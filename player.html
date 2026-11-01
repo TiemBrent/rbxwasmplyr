@@ -14,6 +14,7 @@
   #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
   #canvas.fullscreencanvas, #canvas.mobilecanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
   #canvas.tab-lock-contended { visibility: hidden; }
+
   #loading-overlay {
     position: fixed; inset: 0; z-index: 100;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -23,6 +24,7 @@
   #loading-overlay[hidden] { display: none !important; }
   #loading-overlay.tab-lock-contended { background: #1a1a1a; }
   #loading-overlay.loading-failed #status { display: none; }
+
   #loading-background-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.15; filter: blur(8px); z-index: 0; }
   #loading-icon-shell { position: relative; z-index: 1; width: 120px; height: 120px; border-radius: 12px; overflow: hidden; background: #222; margin-bottom: 16px; display: flex; align-items: center; justify-content: center; }
   #loading-experience-icon { width: 100%; height: 100%; object-fit: cover; }
@@ -32,6 +34,7 @@
   #loading-verified-badge { position: relative; z-index: 1; margin-left: 4px; }
   #loading-verified-badge[hidden] { display: none; }
   #status { position: relative; z-index: 1; font-size: 13px; color: #aaa; text-align: center; max-width: 80%; min-height: 1.2em; }
+
   .loading-error-panel { position: relative; z-index: 2; text-align: center; max-width: 480px; padding: 24px; }
   .loading-error-panel[hidden] { display: none; }
   #loading-error-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
@@ -41,21 +44,24 @@
   #loading-error-leave:hover, #loading-cancel:hover { background: #0090e0; }
   #loading-cancel { position: absolute; bottom: 20px; right: 20px; z-index: 2; background: transparent; color: #888; border: 1px solid #444; }
   #loading-cancel:hover { background: #222; }
+
   #server, #proxyenabled { display: none; }
+
   #input-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 50; display: none; }
   #input-textarea { width: 320px; height: 40px; padding: 8px 12px; font-size: 14px; border-radius: 6px; border: 1px solid #444; background: rgba(0,0,0,0.85); color: #fff; resize: none; }
   #input-input { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+
   #netlog { position: fixed; bottom: 0; left: 0; right: 0; max-height: 45vh; overflow-y: auto; background: rgba(0,0,0,0.94); color: #0f0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.4; padding: 8px 10px; z-index: 99999; display: none; white-space: pre-wrap; word-break: break-all; border-top: 1px solid #0f0; }
   #netlog.visible { display: block; }
   #netlog .err { color: #f55; }
   #netlog .ok { color: #0a0; }
   #netlog .req { color: #888; }
   #netlog .sys { color: #0af; }
+  #netlog .warn { color: #fa0; }
 </style>
 </head>
 <body>
 
-<!-- Required DOM for WasmPlayer.js -->
 <canvas id="canvas"></canvas>
 <div id="loading-overlay" aria-label="Loading Roblox" aria-busy="true">
   <img id="loading-background-image" alt="" />
@@ -89,7 +95,12 @@
 <script src="./coi-serviceworker.js"></script>
 
 <!-- ======================================================================
-     2. NETWORK TRACER
+     2. NETWORK TRACER + CORS TOLERANCE
+     Runs before WasmLoader.js / WasmPlayer.js / WebClient.js.
+     - Logs every fetch/XHR/WS to *.roblox.com / *.rbxcdn.com / *.robloxlabs.com
+     - Intercepts known non-fatal CORS failures on loading-screen metadata
+       endpoints and returns a mock JSON 200 so the engine does not abort.
+     Pass ?debug=1 to mirror the log into an on-screen overlay.
      ====================================================================== -->
 <script>
 (function () {
@@ -103,9 +114,14 @@
   const isRbx = (u) => { try { return RBX_HOST.test(new URL(u, location.href).hostname); } catch { return false; } };
   const relms = () => String(Math.round(performance.now() - t0)).padStart(6, ' ');
   const short = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; };
+
   function emit(cls, prefix, msg) {
     const text = `[${relms()}ms] ${prefix} ${msg}`;
-    const style = cls === 'err' ? 'color:#f55' : cls === 'ok' ? 'color:#0a0' : cls === 'sys' ? 'color:#0af' : 'color:#888';
+    const style =
+      cls === 'err'  ? 'color:#f55' :
+      cls === 'ok'   ? 'color:#0a0' :
+      cls === 'sys'  ? 'color:#0af' :
+      cls === 'warn' ? 'color:#fa0' : 'color:#888';
     console.log('%c' + text, style);
     if (showOverlay && logEl) {
       const d = document.createElement('div');
@@ -115,6 +131,7 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
   }
+
   async function preview(res) {
     if (res.type === 'opaque' || res.type === 'opaqueredirect') return '[opaque]';
     const ct = res.headers.get('content-type') || '';
@@ -125,19 +142,55 @@
     try { return short(await res.clone().text(), 700); } catch (e) { return `[read err: ${e.message}]`; }
   }
 
+  // ---- Endpoints we tolerate CORS failure on -----------------------------
+  // These are the loading-screen / telemetry / analytics calls that fail
+  // because GitHub Pages origin is not in Roblox's Access-Control-Allow-Origin.
+  // They are NOT the join gate. Suppressing them lets the engine boot cleanly
+  // past launchUGCGame without crashing, so we can see the actual join
+  // authorization flow that comes after.
+  //
+  // Everything else (auth.roblox.com, gamejoin.roblox.com, etc.) is left
+  // untouched so we can observe the real 524 / status-12 rejections.
+  const TOLERANT_PATTERNS = [
+    /\/universes\/v1\/places\/[^/]+\/universe/,                    // game metadata
+    /\/v1\/locales\/user-localization-locus-supported-locales/,    // locale
+    /\/v2\/assets\/[^/]+\/details/,                                 // game details
+    /experience-signals-ingest/,                                    // telemetry
+    /ephemeralcounters\.api\.roblox\.com/,                          // counters
+    /ecsv2\.roblox\.com\/(?:timespent|client)\/pbe/,               // rbe analytics
+    /sentry-relay\.rbxinfra\.com/,                                  // crash reporter
+    /metrics\.roblox\.com/,                                         // metrics
+    /\/v1\/thumbnails/,                                             // thumbnails (loading screen)
+    /\/v1\/games\/icons/,                                           // icon
+    /\/v1\/games\/multiget\/thumbnails/,                            // artwork
+    /\/beacon-api\//,                                               // beacon
+  ];
+  const isTolerant = (u) => TOLERANT_PATTERNS.some((re) => re.test(u));
+
+  // Heuristic mock body — enough shape for the engine to not fall over.
+  function mockBodyFor(url) {
+    if (/\/universes\/v1\/places\//.test(url)) return JSON.stringify({ universeId: null });
+    if (/\/v1\/locales\//.test(url)) return JSON.stringify({ generalExperience: { locale: 'en_us' }, ugc: { locale: 'en_us' } });
+    if (/\/v2\/assets\/[^/]+\/details/.test(url)) return JSON.stringify({ Name: '', Creator: { Name: '', HasVerifiedBadge: false } });
+    return JSON.stringify({});
+  }
+
+  // ---- fetch --------------------------------------------------------------
   const _fetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
     let url = '', method = 'GET', body = null;
     try {
-      url = typeof input === 'string' ? input : (input && input.url) || '';
+      url    = typeof input === 'string' ? input : (input && input.url) || '';
       method = (init && init.method) || (input && input.method) || 'GET';
-      body = init && init.body;
+      body   = init && init.body;
     } catch {}
+
     const hot = isRbx(url);
     if (hot) {
       emit('sys', 'FETCH', `→ ${method} ${url}`);
       if (body && typeof body === 'string') emit('req', 'FETCH', `  req: ${short(body, 400)}`);
     }
+
     try {
       const res = await _fetch(input, init);
       if (hot) {
@@ -149,17 +202,34 @@
     } catch (e) {
       if (hot) {
         emit('err', 'FETCH', `✖ ${method} ${url} THREW: ${e.message}`);
-        console.error('[NET THROW]', method, url, e);
       }
+
+      // Graceful degradation for known-benign CORS failures.
+      if (hot && isTolerant(url)) {
+        emit('warn', 'FETCH', `  ↳ CORS-tolerant: returning mock 200 for ${url}`);
+        return new Response(mockBodyFor(url), {
+          status: 200,
+          statusText: 'OK (mocked)',
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (hot) console.error('[NET THROW]', method, url, e);
       throw e;
     }
   };
 
+  // ---- XMLHttpRequest -----------------------------------------------------
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (m, u) { this.__traceUrl = u; this.__traceMethod = m; return _open.apply(this, arguments); };
+  XMLHttpRequest.prototype.open = function (m, u) {
+    this.__traceUrl = u;
+    this.__traceMethod = m;
+    return _open.apply(this, arguments);
+  };
   XMLHttpRequest.prototype.send = function (body) {
-    const url = this.__traceUrl || '', method = this.__traceMethod || 'GET';
+    const url = this.__traceUrl || '';
+    const method = this.__traceMethod || 'GET';
     if (isRbx(url)) {
       emit('sys', 'XHR', `→ ${method} ${url}`);
       if (body && typeof body === 'string') emit('req', 'XHR', `  req: ${short(body, 400)}`);
@@ -174,12 +244,13 @@
     return _send.apply(this, arguments);
   };
 
+  // ---- WebSocket ----------------------------------------------------------
   const _WS = window.WebSocket;
   function WrappedWS(url, protocols) {
     if (isRbx(url)) emit('sys', 'WS', `→ ${url}`);
     const ws = protocols ? new _WS(url, protocols) : new _WS(url);
     if (isRbx(url)) {
-      ws.addEventListener('open', () => emit('ok', 'WS', `← open ${url}`));
+      ws.addEventListener('open',  () => emit('ok',  'WS', `← open ${url}`));
       ws.addEventListener('close', (e) => emit(e.code === 1000 ? 'req' : 'err', 'WS', `← close ${url} code=${e.code}`));
       ws.addEventListener('error', () => emit('err', 'WS', `✖ error ${url}`));
     }
@@ -189,15 +260,24 @@
   Object.setPrototypeOf(WrappedWS, _WS);
   window.WebSocket = WrappedWS;
 
-  window.addEventListener('error', (ev) => { emit('err', 'JS-ERR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`); });
-  window.addEventListener('unhandledrejection', (ev) => { const r = ev.reason; emit('err', 'JS-REJ', String(r && (r.stack || r.message || r))); });
-  emit('sys', 'BOOT', 'Network tracer installed. All roblox.com / rbxcdn.com traffic will be logged.');
+  // ---- Error handlers -----------------------------------------------------
+  window.addEventListener('error', (ev) => {
+    emit('err', 'JS-ERR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
+  });
+  window.addEventListener('unhandledrejection', (ev) => {
+    const r = ev.reason;
+    emit('err', 'JS-REJ', String(r && (r.stack || r.message || r)));
+  });
+
+  emit('sys', 'BOOT', 'Network tracer installed.');
+  emit('sys', 'BOOT', 'CORS-tolerant: universes/locales/assets/details/telemetry/thumbnails only.');
+  emit('sys', 'BOOT', 'Authentication + gamejoin calls are NOT mocked — real failures will be visible.');
   emit('sys', 'BOOT', showOverlay ? 'On-screen overlay enabled (?debug=1).' : 'Add ?debug=1 to URL for on-screen log.');
 })();
 </script>
 
 <!-- ======================================================================
-     3. HOST CONFIG (local engine base)
+     3. HOST CONFIG
      ====================================================================== -->
 <script>
   window.robloxWasmHostConfig = {
