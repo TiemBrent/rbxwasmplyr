@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Roblox WASM Player</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #000; }
+        #player { width: 100vw; height: 100vh; }
+        #status { position: absolute; top: 10px; left: 10px; color: #fff; font-family: sans-serif; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div id="player"></div>
+    <div id="status">Loading engine...</div>
+
+    <script>
+        const statusEl = document.getElementById('status');
+        const playerEl = document.getElementById('player');
+
+        // 1. Get the joinScriptUrl from the query string.
+        const params = new URLSearchParams(window.location.search);
+        const joinScriptUrl = params.get('joinScriptUrl');
+
+        if (!joinScriptUrl) {
+            statusEl.textContent = 'Error: No joinScriptUrl provided.';
+            throw new Error('Missing joinScriptUrl');
+        }
+
+        console.log('[WASM Player] Received joinScriptUrl:', joinScriptUrl);
+
+        // 2. Load the Roblox WASM engine from the CDN.
+        const WASM_BASE = 'https://setup.rbxcdn.com/webclient/version-75f1039cb4964863-RobloxWebClient';
+        const script = document.createElement('script');
+        script.src = `${WASM_BASE}/WasmPlayer.js`;
+        document.head.appendChild(script);
+
+        script.onload = async () => {
+            statusEl.textContent = 'Engine loaded. Starting...';
+
+            // Wait for the global Roblox object to appear.
+            await new Promise(resolve => {
+                const interval = setInterval(() => {
+                    if (window.Roblox && window.Roblox.WasmPlayer) {
+                        clearInterval(interval);
+                        resolve();
+                    }
+                }, 100);
+            });
+
+            try {
+                // 3. Attempt to create the web client with the provided joinScriptUrl.
+                // The exact configuration may need adjustment based on the engine version.
+                // We pass the URL in multiple plausible fields.
+                await window.Roblox.WasmPlayer.createWebClient({
+                    container: playerEl,
+                    baseUrl: WASM_BASE,
+                    joinScriptUrl: joinScriptUrl,
+                    launchData: {
+                        joinScriptUrl: joinScriptUrl
+                    }
+                });
+                statusEl.textContent = 'Game launched.';
+            } catch (err) {
+                console.error('[WASM Player] Launch error:', err);
+                statusEl.textContent = 'Launch failed: ' + err.message;
+            }
+        };
+
+        script.onerror = () => {
+            statusEl.textContent = 'Failed to load the WASM engine script.';
+        };
+    </script>
+</body>
+</html>
