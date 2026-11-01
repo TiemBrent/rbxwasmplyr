@@ -11,118 +11,55 @@
     background: #000; color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
-
-  /* Canvas must fill viewport. WasmPlayer.js adds .fullscreencanvas or .mobilecanvas. */
   #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
   #canvas.fullscreencanvas, #canvas.mobilecanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
   #canvas.tab-lock-contended { visibility: hidden; }
-
-  /* Loading overlay */
   #loading-overlay {
     position: fixed; inset: 0; z-index: 100;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: #111; overflow: hidden;
-    transition: opacity 0.6s ease;
+    background: #111; overflow: hidden; transition: opacity 0.6s ease;
   }
   #loading-overlay.loading-exiting { opacity: 0; pointer-events: none; }
   #loading-overlay[hidden] { display: none !important; }
   #loading-overlay.tab-lock-contended { background: #1a1a1a; }
   #loading-overlay.loading-failed #status { display: none; }
-
-  #loading-background-image {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: cover; opacity: 0.15; filter: blur(8px); z-index: 0;
-  }
-
-  #loading-icon-shell {
-    position: relative; z-index: 1;
-    width: 120px; height: 120px; border-radius: 12px; overflow: hidden;
-    background: #222; margin-bottom: 16px;
-    display: flex; align-items: center; justify-content: center;
-  }
+  #loading-background-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.15; filter: blur(8px); z-index: 0; }
+  #loading-icon-shell { position: relative; z-index: 1; width: 120px; height: 120px; border-radius: 12px; overflow: hidden; background: #222; margin-bottom: 16px; display: flex; align-items: center; justify-content: center; }
   #loading-experience-icon { width: 100%; height: 100%; object-fit: cover; }
-
-  #loading-experience-title {
-    position: relative; z-index: 1;
-    font-size: 20px; font-weight: 600; margin-bottom: 4px; text-align: center;
-    max-width: 80%;
-  }
-  #loading-experience-creator {
-    position: relative; z-index: 1;
-    font-size: 14px; color: #aaa; margin-bottom: 24px;
-  }
+  #loading-experience-title { position: relative; z-index: 1; font-size: 20px; font-weight: 600; margin-bottom: 4px; text-align: center; max-width: 80%; }
+  #loading-experience-creator { position: relative; z-index: 1; font-size: 14px; color: #aaa; margin-bottom: 24px; }
   #loading-experience-creator[hidden] { display: none; }
   #loading-verified-badge { position: relative; z-index: 1; margin-left: 4px; }
   #loading-verified-badge[hidden] { display: none; }
-
-  #status {
-    position: relative; z-index: 1;
-    font-size: 13px; color: #aaa; text-align: center;
-    max-width: 80%; min-height: 1.2em;
-  }
-
-  /* Error panel */
-  .loading-error-panel {
-    position: relative; z-index: 2;
-    text-align: center; max-width: 480px; padding: 24px;
-  }
+  #status { position: relative; z-index: 1; font-size: 13px; color: #aaa; text-align: center; max-width: 80%; min-height: 1.2em; }
+  .loading-error-panel { position: relative; z-index: 2; text-align: center; max-width: 480px; padding: 24px; }
   .loading-error-panel[hidden] { display: none; }
   #loading-error-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
   #loading-error-message { font-size: 14px; color: #ddd; margin-bottom: 8px; }
   #loading-error-code { font-size: 12px; color: #888; font-family: monospace; margin-bottom: 16px; }
-  #loading-error-leave, #loading-cancel {
-    padding: 8px 24px; border: none; border-radius: 6px;
-    background: #00a2ff; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px;
-  }
+  #loading-error-leave, #loading-cancel { padding: 8px 24px; border: none; border-radius: 6px; background: #00a2ff; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }
   #loading-error-leave:hover, #loading-cancel:hover { background: #0090e0; }
-  #loading-cancel {
-    position: absolute; bottom: 20px; right: 20px; z-index: 2;
-    background: transparent; color: #888; border: 1px solid #444;
-  }
+  #loading-cancel { position: absolute; bottom: 20px; right: 20px; z-index: 2; background: transparent; color: #888; border: 1px solid #444; }
   #loading-cancel:hover { background: #222; }
-
-  /* Helper nodes WasmPlayer.js writes into */
   #server, #proxyenabled { display: none; }
-
-  /* Chat / text input – hidden until the engine explicitly shows it */
-  #input-container {
-    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-    z-index: 50; display: none;
-  }
-  #input-textarea {
-    width: 320px; height: 40px; padding: 8px 12px; font-size: 14px;
-    border-radius: 6px; border: 1px solid #444;
-    background: rgba(0,0,0,0.85); color: #fff; resize: none;
-  }
+  #input-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 50; display: none; }
+  #input-textarea { width: 320px; height: 40px; padding: 8px 12px; font-size: 14px; border-radius: 6px; border: 1px solid #444; background: rgba(0,0,0,0.85); color: #fff; resize: none; }
   #input-input { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
-
-  /* Debug overlay for the network tracer (?debug=1) */
-  #netlog {
-    position: fixed; bottom: 0; left: 0; right: 0; max-height: 45vh; overflow-y: auto;
-    background: rgba(0,0,0,0.94); color: #0f0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 11px; line-height: 1.4;
-    padding: 8px 10px; z-index: 99999; display: none;
-    white-space: pre-wrap; word-break: break-all;
-    border-top: 1px solid #0f0;
-  }
+  #netlog { position: fixed; bottom: 0; left: 0; right: 0; max-height: 45vh; overflow-y: auto; background: rgba(0,0,0,0.94); color: #0f0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.4; padding: 8px 10px; z-index: 99999; display: none; white-space: pre-wrap; word-break: break-all; border-top: 1px solid #0f0; }
   #netlog.visible { display: block; }
-  #netlog .err  { color: #f55; }
-  #netlog .ok   { color: #0a0; }
-  #netlog .req  { color: #888; }
-  #netlog .sys  { color: #0af; }
+  #netlog .err { color: #f55; }
+  #netlog .ok { color: #0a0; }
+  #netlog .req { color: #888; }
+  #netlog .sys { color: #0af; }
 </style>
 </head>
 <body>
 
-<!-- ========== DOM ELEMENTS REQUIRED BY WasmPlayer.js ========== -->
+<!-- Required DOM for WasmPlayer.js -->
 <canvas id="canvas"></canvas>
-
 <div id="loading-overlay" aria-label="Loading Roblox" aria-busy="true">
   <img id="loading-background-image" alt="" />
-  <div id="loading-icon-shell">
-    <img id="loading-experience-icon" alt="" />
-  </div>
+  <div id="loading-icon-shell"><img id="loading-experience-icon" alt="" /></div>
   <div id="loading-experience-title">Roblox</div>
   <div id="loading-experience-creator" hidden></div>
   <span id="loading-verified-badge" hidden></span>
@@ -135,42 +72,37 @@
   </div>
   <button id="loading-cancel">Cancel</button>
 </div>
-
 <div id="input-container">
   <textarea id="input-textarea" placeholder="Chat…"></textarea>
   <input id="input-input" type="text" />
 </div>
-
 <div id="server"></div>
 <div id="proxyenabled"></div>
-
 <div id="netlog"></div>
-<!-- ============================================================ -->
 
 <!-- ======================================================================
-     NETWORK TRACER
-     Must run BEFORE WasmLoader.js / WasmPlayer.js / WebClient.js so every
-     fetch/XHR/WebSocket those scripts make is captured.
-     Pass ?debug=1 to mirror the log into an on-screen overlay.
+     1. CROSS-ORIGIN ISOLATION (must run first)
+     GitHub Pages cannot set COOP/COEP headers. coi-serviceworker.js
+     registers a service worker that adds them client-side.
+     The page reloads once on first visit; subsequent loads are isolated.
+     ====================================================================== -->
+<script src="./coi-serviceworker.js"></script>
+
+<!-- ======================================================================
+     2. NETWORK TRACER
      ====================================================================== -->
 <script>
 (function () {
-  const params     = new URLSearchParams(location.search);
+  const params = new URLSearchParams(location.search);
   const showOverlay = params.get('debug') === '1';
-  const logEl      = document.getElementById('netlog');
-  const t0         = performance.now();
-
+  const logEl = document.getElementById('netlog');
+  const t0 = performance.now();
   if (showOverlay && logEl) logEl.classList.add('visible');
 
   const RBX_HOST = /(?:^|\.)(?:roblox\.com|rbxcdn\.com|robloxlabs\.com)$/i;
   const isRbx = (u) => { try { return RBX_HOST.test(new URL(u, location.href).hostname); } catch { return false; } };
-
   const relms = () => String(Math.round(performance.now() - t0)).padStart(6, ' ');
-  const short = (s, n) => {
-    s = String(s == null ? '' : s);
-    return s.length > n ? s.slice(0, n) + '…' : s;
-  };
-
+  const short = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; };
   function emit(cls, prefix, msg) {
     const text = `[${relms()}ms] ${prefix} ${msg}`;
     const style = cls === 'err' ? 'color:#f55' : cls === 'ok' ? 'color:#0a0' : cls === 'sys' ? 'color:#0af' : 'color:#888';
@@ -183,7 +115,6 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
   }
-
   async function preview(res) {
     if (res.type === 'opaque' || res.type === 'opaqueredirect') return '[opaque]';
     const ct = res.headers.get('content-type') || '';
@@ -191,26 +122,22 @@
       const len = res.headers.get('content-length');
       return `[binary ct=${ct || '?'}${len ? ' ' + len + 'B' : ''}]`;
     }
-    try { return short(await res.clone().text(), 700); }
-    catch (e) { return `[read err: ${e.message}]`; }
+    try { return short(await res.clone().text(), 700); } catch (e) { return `[read err: ${e.message}]`; }
   }
 
-  // ---------- fetch ----------
   const _fetch = window.fetch.bind(window);
   window.fetch = async function (input, init) {
     let url = '', method = 'GET', body = null;
     try {
-      url    = typeof input === 'string' ? input : (input && input.url) || '';
+      url = typeof input === 'string' ? input : (input && input.url) || '';
       method = (init && init.method) || (input && input.method) || 'GET';
-      body   = init && init.body;
+      body = init && init.body;
     } catch {}
-
     const hot = isRbx(url);
     if (hot) {
       emit('sys', 'FETCH', `→ ${method} ${url}`);
       if (body && typeof body === 'string') emit('req', 'FETCH', `  req: ${short(body, 400)}`);
     }
-
     try {
       const res = await _fetch(input, init);
       if (hot) {
@@ -228,17 +155,11 @@
     }
   };
 
-  // ---------- XMLHttpRequest ----------
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (m, u) {
-    this.__traceUrl = u;
-    this.__traceMethod = m;
-    return _open.apply(this, arguments);
-  };
+  XMLHttpRequest.prototype.open = function (m, u) { this.__traceUrl = u; this.__traceMethod = m; return _open.apply(this, arguments); };
   XMLHttpRequest.prototype.send = function (body) {
-    const url = this.__traceUrl || '';
-    const method = this.__traceMethod || 'GET';
+    const url = this.__traceUrl || '', method = this.__traceMethod || 'GET';
     if (isRbx(url)) {
       emit('sys', 'XHR', `→ ${method} ${url}`);
       if (body && typeof body === 'string') emit('req', 'XHR', `  req: ${short(body, 400)}`);
@@ -247,19 +168,18 @@
         emit(ok ? 'ok' : 'err', 'XHR', `← ${this.status} ${method} ${url}`);
         try { emit('req', 'XHR', `  res: ${short(this.responseText, 700)}`); } catch {}
       });
-      this.addEventListener('error',   () => emit('err', 'XHR', `✖ ${method} ${url} ERROR`));
+      this.addEventListener('error', () => emit('err', 'XHR', `✖ ${method} ${url} ERROR`));
       this.addEventListener('timeout', () => emit('err', 'XHR', `✖ ${method} ${url} TIMEOUT`));
     }
     return _send.apply(this, arguments);
   };
 
-  // ---------- WebSocket ----------
   const _WS = window.WebSocket;
   function WrappedWS(url, protocols) {
     if (isRbx(url)) emit('sys', 'WS', `→ ${url}`);
     const ws = protocols ? new _WS(url, protocols) : new _WS(url);
     if (isRbx(url)) {
-      ws.addEventListener('open',  () => emit('ok',  'WS', `← open ${url}`));
+      ws.addEventListener('open', () => emit('ok', 'WS', `← open ${url}`));
       ws.addEventListener('close', (e) => emit(e.code === 1000 ? 'req' : 'err', 'WS', `← close ${url} code=${e.code}`));
       ws.addEventListener('error', () => emit('err', 'WS', `✖ error ${url}`));
     }
@@ -269,59 +189,25 @@
   Object.setPrototypeOf(WrappedWS, _WS);
   window.WebSocket = WrappedWS;
 
-  // ---------- errors ----------
-  window.addEventListener('error', (ev) => {
-    emit('err', 'JS-ERR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
-  });
-  window.addEventListener('unhandledrejection', (ev) => {
-    const r = ev.reason;
-    emit('err', 'JS-REJ', String(r && (r.stack || r.message || r)));
-  });
-
+  window.addEventListener('error', (ev) => { emit('err', 'JS-ERR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`); });
+  window.addEventListener('unhandledrejection', (ev) => { const r = ev.reason; emit('err', 'JS-REJ', String(r && (r.stack || r.message || r))); });
   emit('sys', 'BOOT', 'Network tracer installed. All roblox.com / rbxcdn.com traffic will be logged.');
   emit('sys', 'BOOT', showOverlay ? 'On-screen overlay enabled (?debug=1).' : 'Add ?debug=1 to URL for on-screen log.');
 })();
 </script>
 
 <!-- ======================================================================
-     HOST CONFIG
-     WasmLoader.js reads window.robloxWasmHostConfig and resolves the engine base.
-
-     useCdnBinary: false → load WebClient.js, WebClient.wasm,
-                           WebClient.metadata.json, audio-processor-fast.js
-                           from the SAME folder as WasmLoader.js (your repo).
-     useCdnBinary: true  → resolve via setup.rbxcdn.com. Will likely 403
-                           from github.io because the CDN blocks non-approved
-                           origins. Kept as an option if you want to test it.
-
-     Required files in the same folder for useCdnBinary:false:
-       WasmLoader.js
-       WasmPlayer.js
-       WebClient.js
-       WebClient.wasm
-       WebClient.metadata.json
-       audio-processor-fast.js
+     3. HOST CONFIG (local engine base)
      ====================================================================== -->
 <script>
   window.robloxWasmHostConfig = {
     server: 'prod',
     useCdnBinary: false,
-    // engineVersion: 'version-75f1039cb4964863'  // optional: pin a specific build
   };
 </script>
 
 <!-- ======================================================================
-     ENGINE LOADER
-     WasmLoader.js:
-       1. resolves engineBase from robloxWasmHostConfig
-       2. sets window.__wasmLoaderContext
-       3. injects WasmPlayer.js from ${engineBase}/WasmPlayer.js
-     WasmPlayer.js then constructs the Emscripten Module, loads WebClient.js
-     and WebClient.wasm, and calls createWebClient(module).
-
-     Any join failure (e.g. 524 "Not authorized to join this experience")
-     is emitted by the engine via window.__onEngineLoadingStatus. The failing
-     network request that triggers it will be visible in the trace above.
+     4. ENGINE LOADER
      ====================================================================== -->
 <script src="./WasmLoader.js"></script>
 
