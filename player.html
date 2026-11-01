@@ -1,281 +1,329 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Roblox Web Client</title>
-  <style>
-    /* Minimal reset so the canvas fills the viewport */
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
-    #canvas { width: 100%; height: 100%; display: block; }
-    #loading-overlay {
-      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      background: #111; color: #fff; font-family: sans-serif; z-index: 100;
-    }
-    #loading-overlay.hidden { display: none; }
-    #status { margin-bottom: 20px; font-size: 1.2rem; text-align: center; max-width: 80%; }
-    #input-container { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 50; }
-    #input-textarea { width: 300px; height: 40px; padding: 8px; font-size: 1rem; }
-    #input-input { display: none; }
-    #server, #proxyenabled { display: none; } /* placeholders required by WasmPlayer.js */
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Roblox Web Client</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #000; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+
+  /* Canvas must fill viewport. WasmPlayer.js adds .fullscreencanvas or .mobilecanvas. */
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
+  #canvas.fullscreencanvas, #canvas.mobilecanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+  #canvas.tab-lock-contended { visibility: hidden; }
+
+  /* Loading overlay */
+  #loading-overlay {
+    position: fixed; inset: 0; z-index: 100;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: #111; overflow: hidden;
+    transition: opacity 0.6s ease;
+  }
+  #loading-overlay.loading-exiting { opacity: 0; pointer-events: none; }
+  #loading-overlay[hidden] { display: none !important; }
+  #loading-overlay.tab-lock-contended { background: #1a1a1a; }
+  #loading-overlay.loading-failed #status { display: none; }
+
+  #loading-background-image {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; opacity: 0.15; filter: blur(8px); z-index: 0;
+  }
+
+  #loading-icon-shell {
+    position: relative; z-index: 1;
+    width: 120px; height: 120px; border-radius: 12px; overflow: hidden;
+    background: #222; margin-bottom: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #loading-experience-icon { width: 100%; height: 100%; object-fit: cover; }
+
+  #loading-experience-title {
+    position: relative; z-index: 1;
+    font-size: 20px; font-weight: 600; margin-bottom: 4px; text-align: center;
+    max-width: 80%;
+  }
+  #loading-experience-creator {
+    position: relative; z-index: 1;
+    font-size: 14px; color: #aaa; margin-bottom: 24px;
+  }
+  #loading-experience-creator[hidden] { display: none; }
+  #loading-verified-badge { position: relative; z-index: 1; margin-left: 4px; }
+  #loading-verified-badge[hidden] { display: none; }
+
+  #status {
+    position: relative; z-index: 1;
+    font-size: 13px; color: #aaa; text-align: center;
+    max-width: 80%; min-height: 1.2em;
+  }
+
+  /* Error panel */
+  .loading-error-panel {
+    position: relative; z-index: 2;
+    text-align: center; max-width: 480px; padding: 24px;
+  }
+  .loading-error-panel[hidden] { display: none; }
+  #loading-error-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+  #loading-error-message { font-size: 14px; color: #ddd; margin-bottom: 8px; }
+  #loading-error-code { font-size: 12px; color: #888; font-family: monospace; margin-bottom: 16px; }
+  #loading-error-leave, #loading-cancel {
+    padding: 8px 24px; border: none; border-radius: 6px;
+    background: #00a2ff; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px;
+  }
+  #loading-error-leave:hover, #loading-cancel:hover { background: #0090e0; }
+  #loading-cancel {
+    position: absolute; bottom: 20px; right: 20px; z-index: 2;
+    background: transparent; color: #888; border: 1px solid #444;
+  }
+  #loading-cancel:hover { background: #222; }
+
+  /* Helper nodes WasmPlayer.js writes into */
+  #server, #proxyenabled { display: none; }
+
+  /* Chat / text input – hidden until the engine explicitly shows it */
+  #input-container {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 50; display: none;
+  }
+  #input-textarea {
+    width: 320px; height: 40px; padding: 8px 12px; font-size: 14px;
+    border-radius: 6px; border: 1px solid #444;
+    background: rgba(0,0,0,0.85); color: #fff; resize: none;
+  }
+  #input-input { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+
+  /* Debug overlay for the network tracer (?debug=1) */
+  #netlog {
+    position: fixed; bottom: 0; left: 0; right: 0; max-height: 45vh; overflow-y: auto;
+    background: rgba(0,0,0,0.94); color: #0f0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 11px; line-height: 1.4;
+    padding: 8px 10px; z-index: 99999; display: none;
+    white-space: pre-wrap; word-break: break-all;
+    border-top: 1px solid #0f0;
+  }
+  #netlog.visible { display: block; }
+  #netlog .err  { color: #f55; }
+  #netlog .ok   { color: #0a0; }
+  #netlog .req  { color: #888; }
+  #netlog .sys  { color: #0af; }
+</style>
 </head>
 <body>
 
-  <!-- ========== REQUIRED DOM ELEMENTS ========== -->
-  <!-- WasmPlayer.js throws if any of these are missing -->
-  <canvas id="canvas"></canvas>
+<!-- ========== DOM ELEMENTS REQUIRED BY WasmPlayer.js ========== -->
+<canvas id="canvas"></canvas>
 
-  <div id="loading-overlay">
-    <div id="status">Initialising…</div>
+<div id="loading-overlay" aria-label="Loading Roblox" aria-busy="true">
+  <img id="loading-background-image" alt="" />
+  <div id="loading-icon-shell">
+    <img id="loading-experience-icon" alt="" />
   </div>
-
-  <div id="input-container">
-    <textarea id="input-textarea" placeholder="Chat…"></textarea>
-    <input id="input-input" type="text" />
+  <div id="loading-experience-title">Roblox</div>
+  <div id="loading-experience-creator" hidden></div>
+  <span id="loading-verified-badge" hidden></span>
+  <div id="status">Initialising…</div>
+  <div class="loading-error-panel" hidden>
+    <div id="loading-error-title">Error</div>
+    <div id="loading-error-message"></div>
+    <div id="loading-error-code"></div>
+    <button id="loading-error-leave">Leave</button>
   </div>
+  <button id="loading-cancel">Cancel</button>
+</div>
 
-  <div id="server"></div>
-  <div id="proxyenabled"></div>
-  <!-- ========================================== -->
+<div id="input-container">
+  <textarea id="input-textarea" placeholder="Chat…"></textarea>
+  <input id="input-input" type="text" />
+</div>
 
-  <script>
-    (async function () {
-      // ---------------------------------------------------------------
-      // 0. Grab the joinScriptUrl from the query string
-      // ---------------------------------------------------------------
-      const params = new URLSearchParams(window.location.search);
-      const joinScriptUrl = params.get("joinScriptUrl");
+<div id="server"></div>
+<div id="proxyenabled"></div>
 
-      if (!joinScriptUrl) {
-        document.getElementById("status").textContent =
-          "❌ Missing ?joinScriptUrl=… in the URL.";
-        return;
+<div id="netlog"></div>
+<!-- ============================================================ -->
+
+<!-- ======================================================================
+     NETWORK TRACER
+     Must run BEFORE WasmLoader.js / WasmPlayer.js / WebClient.js so every
+     fetch/XHR/WebSocket those scripts make is captured.
+     Pass ?debug=1 to mirror the log into an on-screen overlay.
+     ====================================================================== -->
+<script>
+(function () {
+  const params     = new URLSearchParams(location.search);
+  const showOverlay = params.get('debug') === '1';
+  const logEl      = document.getElementById('netlog');
+  const t0         = performance.now();
+
+  if (showOverlay && logEl) logEl.classList.add('visible');
+
+  const RBX_HOST = /(?:^|\.)(?:roblox\.com|rbxcdn\.com|robloxlabs\.com)$/i;
+  const isRbx = (u) => { try { return RBX_HOST.test(new URL(u, location.href).hostname); } catch { return false; } };
+
+  const relms = () => String(Math.round(performance.now() - t0)).padStart(6, ' ');
+  const short = (s, n) => {
+    s = String(s == null ? '' : s);
+    return s.length > n ? s.slice(0, n) + '…' : s;
+  };
+
+  function emit(cls, prefix, msg) {
+    const text = `[${relms()}ms] ${prefix} ${msg}`;
+    const style = cls === 'err' ? 'color:#f55' : cls === 'ok' ? 'color:#0a0' : cls === 'sys' ? 'color:#0af' : 'color:#888';
+    console.log('%c' + text, style);
+    if (showOverlay && logEl) {
+      const d = document.createElement('div');
+      d.className = cls;
+      d.textContent = text;
+      logEl.appendChild(d);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  }
+
+  async function preview(res) {
+    if (res.type === 'opaque' || res.type === 'opaqueredirect') return '[opaque]';
+    const ct = res.headers.get('content-type') || '';
+    if (!/json|text|xml|javascript|html|plain/i.test(ct)) {
+      const len = res.headers.get('content-length');
+      return `[binary ct=${ct || '?'}${len ? ' ' + len + 'B' : ''}]`;
+    }
+    try { return short(await res.clone().text(), 700); }
+    catch (e) { return `[read err: ${e.message}]`; }
+  }
+
+  // ---------- fetch ----------
+  const _fetch = window.fetch.bind(window);
+  window.fetch = async function (input, init) {
+    let url = '', method = 'GET', body = null;
+    try {
+      url    = typeof input === 'string' ? input : (input && input.url) || '';
+      method = (init && init.method) || (input && input.method) || 'GET';
+      body   = init && init.body;
+    } catch {}
+
+    const hot = isRbx(url);
+    if (hot) {
+      emit('sys', 'FETCH', `→ ${method} ${url}`);
+      if (body && typeof body === 'string') emit('req', 'FETCH', `  req: ${short(body, 400)}`);
+    }
+
+    try {
+      const res = await _fetch(input, init);
+      if (hot) {
+        emit(res.ok ? 'ok' : 'err', 'FETCH', `← ${res.status} ${res.statusText} ${method} ${url}`);
+        emit('req', 'FETCH', `  res: ${await preview(res)}`);
+        if (!res.ok) console.warn('[NET FAIL]', method, url, '→', res.status, res.statusText);
       }
-
-      // ---------------------------------------------------------------
-      // 1. Dynamic version fetch (with localStorage cache)
-      // ---------------------------------------------------------------
-      const VERSION_CACHE_KEY = "rbx_webclient_version_v1";
-      const VERSION_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
-      const FALLBACK_VERSION = "version-75f1039cb4964863-RobloxWebClient";
-
-      /**
-       * Returns the full web-client version string, e.g.:
-       *   "version-75f1039cb4964863-RobloxWebClient"
-       *
-       * Strategy:
-       *   1. Read cached version from localStorage if fresh (< 6 h old)
-       *   2. Try clientsettingscdn.roblox.com (WebPlayer)
-       *   3. Try clientsettingscdn.roblox.com (WindowsPlayer)
-       *   4. Try setup.rbxcdn.com/version (plain text)
-       *   5. Fall back to hard-coded version from the last known good build
-       *
-       * Caching matters because the joinScriptUrl expires quickly — we
-       * don't want a cold network round-trip eating into the window.
-       */
-      async function fetchWebClientVersion() {
-        // ---- 1. Cache lookup ----
-        try {
-          const cached = JSON.parse(
-            localStorage.getItem(VERSION_CACHE_KEY) || "null"
-          );
-          if (
-            cached &&
-            cached.v &&
-            typeof cached.t === "number" &&
-            Date.now() - cached.t < VERSION_CACHE_TTL_MS
-          ) {
-            console.log("[player] Using cached version:", cached.v);
-            return cached.v;
-          }
-        } catch (_) {
-          /* corrupt cache — ignore and refetch */
-        }
-
-        let result = null;
-
-        const extractFromJson = (data) => {
-          if (data && data.clientVersionUpload) {
-            return data.clientVersionUpload + "-RobloxWebClient";
-          }
-          if (typeof data === "string" && data.startsWith("version-")) {
-            return data + "-RobloxWebClient";
-          }
-          if (data && data.version && data.version.startsWith("version-")) {
-            return data.version + "-RobloxWebClient";
-          }
-          return null;
-        };
-
-        // ---- 2. Attempt #1 – WebPlayer ----
-        try {
-          const res = await fetch(
-            "https://clientsettingscdn.roblox.com/v2/client-version/WebPlayer",
-            { headers: { Accept: "application/json" } }
-          );
-          if (res.ok) {
-            const v = extractFromJson(await res.json());
-            if (v) result = v;
-          }
-        } catch (_) {
-          /* network error — try next */
-        }
-
-        // ---- 3. Attempt #2 – WindowsPlayer ----
-        if (!result) {
-          try {
-            const res = await fetch(
-              "https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer",
-              { headers: { Accept: "application/json" } }
-            );
-            if (res.ok) {
-              const v = extractFromJson(await res.json());
-              if (v) result = v;
-            }
-          } catch (_) {
-            /* ignore */
-          }
-        }
-
-        // ---- 4. Attempt #3 – setup.rbxcdn.com/version ----
-        if (!result) {
-          try {
-            const res = await fetch("https://setup.rbxcdn.com/version", {
-              headers: { Accept: "text/plain" },
-            });
-            if (res.ok) {
-              const text = (await res.text()).trim();
-              if (text.startsWith("version-")) {
-                result = text + "-RobloxWebClient";
-              }
-            }
-          } catch (_) {
-            /* ignore */
-          }
-        }
-
-        // ---- 5. Fallback ----
-        if (!result) {
-          console.warn(
-            "[player] Dynamic version fetch failed — using fallback:",
-            FALLBACK_VERSION
-          );
-          result = FALLBACK_VERSION;
-        }
-
-        // ---- 6. Persist to cache ----
-        try {
-          localStorage.setItem(
-            VERSION_CACHE_KEY,
-            JSON.stringify({ v: result, t: Date.now() })
-          );
-        } catch (_) {
-          /* quota / private mode — non-fatal */
-        }
-
-        return result;
+      return res;
+    } catch (e) {
+      if (hot) {
+        emit('err', 'FETCH', `✖ ${method} ${url} THREW: ${e.message}`);
+        console.error('[NET THROW]', method, url, e);
       }
+      throw e;
+    }
+  };
 
-      // ---------------------------------------------------------------
-      // 2. Resolve the WASM script URLs (served from YOUR origin)
-      // ---------------------------------------------------------------
-      // If you host the republished scripts in a sub-folder, change this
-      // to e.g. "/wasm/".
-      const WASM_BASE = "";
+  // ---------- XMLHttpRequest ----------
+  const _open = XMLHttpRequest.prototype.open;
+  const _send = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, u) {
+    this.__traceUrl = u;
+    this.__traceMethod = m;
+    return _open.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function (body) {
+    const url = this.__traceUrl || '';
+    const method = this.__traceMethod || 'GET';
+    if (isRbx(url)) {
+      emit('sys', 'XHR', `→ ${method} ${url}`);
+      if (body && typeof body === 'string') emit('req', 'XHR', `  req: ${short(body, 400)}`);
+      this.addEventListener('load', () => {
+        const ok = this.status >= 200 && this.status < 400;
+        emit(ok ? 'ok' : 'err', 'XHR', `← ${this.status} ${method} ${url}`);
+        try { emit('req', 'XHR', `  res: ${short(this.responseText, 700)}`); } catch {}
+      });
+      this.addEventListener('error',   () => emit('err', 'XHR', `✖ ${method} ${url} ERROR`));
+      this.addEventListener('timeout', () => emit('err', 'XHR', `✖ ${method} ${url} TIMEOUT`));
+    }
+    return _send.apply(this, arguments);
+  };
 
-      function scriptUrl(filename) {
-        return WASM_BASE + filename;
-      }
+  // ---------- WebSocket ----------
+  const _WS = window.WebSocket;
+  function WrappedWS(url, protocols) {
+    if (isRbx(url)) emit('sys', 'WS', `→ ${url}`);
+    const ws = protocols ? new _WS(url, protocols) : new _WS(url);
+    if (isRbx(url)) {
+      ws.addEventListener('open',  () => emit('ok',  'WS', `← open ${url}`));
+      ws.addEventListener('close', (e) => emit(e.code === 1000 ? 'req' : 'err', 'WS', `← close ${url} code=${e.code}`));
+      ws.addEventListener('error', () => emit('err', 'WS', `✖ error ${url}`));
+    }
+    return ws;
+  }
+  WrappedWS.prototype = _WS.prototype;
+  Object.setPrototypeOf(WrappedWS, _WS);
+  window.WebSocket = WrappedWS;
 
-      // ---------------------------------------------------------------
-      // 3. Load a script and resolve when it has executed
-      // ---------------------------------------------------------------
-      function loadScript(src) {
-        return new Promise((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = src;
-          s.onload = resolve;
-          s.onerror = () =>
-            reject(new Error("Failed to load script: " + src));
-          document.head.appendChild(s);
-        });
-      }
+  // ---------- errors ----------
+  window.addEventListener('error', (ev) => {
+    emit('err', 'JS-ERR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
+  });
+  window.addEventListener('unhandledrejection', (ev) => {
+    const r = ev.reason;
+    emit('err', 'JS-REJ', String(r && (r.stack || r.message || r)));
+  });
 
-      // ---------------------------------------------------------------
-      // 4. Wait for a global to appear (with timeout)
-      // ---------------------------------------------------------------
-      function waitForGlobal(name, timeoutMs = 10000) {
-        return new Promise((resolve, reject) => {
-          if (window[name]) return resolve(window[name]);
+  emit('sys', 'BOOT', 'Network tracer installed. All roblox.com / rbxcdn.com traffic will be logged.');
+  emit('sys', 'BOOT', showOverlay ? 'On-screen overlay enabled (?debug=1).' : 'Add ?debug=1 to URL for on-screen log.');
+})();
+</script>
 
-          const start = Date.now();
-          const iv = setInterval(() => {
-            if (window[name]) {
-              clearInterval(iv);
-              resolve(window[name]);
-            } else if (Date.now() - start > timeoutMs) {
-              clearInterval(iv);
-              reject(new Error("Timed out waiting for window." + name));
-            }
-          }, 50);
-        });
-      }
+<!-- ======================================================================
+     HOST CONFIG
+     WasmLoader.js reads window.robloxWasmHostConfig and resolves the engine base.
 
-      // ---------------------------------------------------------------
-      // 5. Main boot sequence
-      // ---------------------------------------------------------------
-      try {
-        const statusEl = document.getElementById("status");
+     useCdnBinary: false → load WebClient.js, WebClient.wasm,
+                           WebClient.metadata.json, audio-processor-fast.js
+                           from the SAME folder as WasmLoader.js (your repo).
+     useCdnBinary: true  → resolve via setup.rbxcdn.com. Will likely 403
+                           from github.io because the CDN blocks non-approved
+                           origins. Kept as an option if you want to test it.
 
-        // --- 5a. Fetch the current web-client version ---
-        statusEl.textContent = "Fetching web-client version…";
-        const version = await fetchWebClientVersion();
-        console.log("[player] Using web-client version:", version);
+     Required files in the same folder for useCdnBinary:false:
+       WasmLoader.js
+       WasmPlayer.js
+       WebClient.js
+       WebClient.wasm
+       WebClient.metadata.json
+       audio-processor-fast.js
+     ====================================================================== -->
+<script>
+  window.robloxWasmHostConfig = {
+    server: 'prod',
+    useCdnBinary: false,
+    // engineVersion: 'version-75f1039cb4964863'  // optional: pin a specific build
+  };
+</script>
 
-        // --- 5b. Build the final script URLs ---
-        //   Example: /webclient/version-…-RobloxWebClient/WasmLoader.js
-        const versionBase = `/webclient/${version}/`;
-        const loaderUrl = scriptUrl(versionBase + "WasmLoader.js");
-        const playerUrl = scriptUrl(versionBase + "WasmPlayer.js");
+<!-- ======================================================================
+     ENGINE LOADER
+     WasmLoader.js:
+       1. resolves engineBase from robloxWasmHostConfig
+       2. sets window.__wasmLoaderContext
+       3. injects WasmPlayer.js from ${engineBase}/WasmPlayer.js
+     WasmPlayer.js then constructs the Emscripten Module, loads WebClient.js
+     and WebClient.wasm, and calls createWebClient(module).
 
-        // --- 5c. Load WasmLoader.js FIRST ---
-        statusEl.textContent = "Loading WasmLoader.js…";
-        await loadScript(loaderUrl);
+     Any join failure (e.g. 524 "Not authorized to join this experience")
+     is emitted by the engine via window.__onEngineLoadingStatus. The failing
+     network request that triggers it will be visible in the trace above.
+     ====================================================================== -->
+<script src="./WasmLoader.js"></script>
 
-        // --- 5d. Wait for __wasmLoaderContext (critical) ---
-        statusEl.textContent = "Waiting for WasmLoader context…";
-        await waitForGlobal("__wasmLoaderContext");
-
-        // --- 5e. Load WasmPlayer.js SECOND ---
-        statusEl.textContent = "Loading WasmPlayer.js…";
-        await loadScript(playerUrl);
-
-        // --- 5f. Wait for createWebClient to be defined ---
-        statusEl.textContent = "Waiting for engine…";
-        await waitForGlobal("createWebClient");
-
-        // --- 5g. Launch ---
-        statusEl.textContent = "Launching game…";
-
-        document
-          .getElementById("loading-overlay")
-          .classList.add("hidden");
-
-        window.createWebClient({
-          joinScriptUrl: joinScriptUrl,
-          launchData: { joinScriptUrl: joinScriptUrl },
-        });
-
-        console.log("[player] createWebClient() invoked.");
-      } catch (err) {
-        console.error("[player] Boot failed:", err);
-        document.getElementById("status").textContent =
-          "❌ " + err.message;
-      }
-    })();
-  </script>
 </body>
 </html>
