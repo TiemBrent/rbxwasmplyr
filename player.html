@@ -50,59 +50,78 @@
         console.log('[WASM Player] Received joinScriptUrl:', joinScriptUrl);
 
         const WASM_BASE = 'https://setup.rbxcdn.com/webclient/version-75f1039cb4964863-RobloxWebClient';
+        const REFERRER = 'https://play.roblox.com/'; // Spoof the origin
 
-        // 2. Load the WasmLoader.js script FIRST.
-        const loaderScript = document.createElement('script');
-        loaderScript.src = `${WASM_BASE}/WasmLoader.js`;
-        document.head.appendChild(loaderScript);
-
-        loaderScript.onload = () => {
-            statusEl.textContent = 'Loader script loaded. Initializing...';
-            loadingOverlay.textContent = 'Initializing engine...';
-
-            // The loader sets up window.__wasmLoaderContext. We wait for it to appear.
-            const waitForContext = setInterval(() => {
-                if (window.__wasmLoaderContext) {
-                    clearInterval(waitForContext);
-                    console.log('[WASM Player] __wasmLoaderContext is ready.');
-                    
-                    // 3. Now it is safe to load WasmPlayer.js.
-                    const playerScript = document.createElement('script');
-                    playerScript.src = `${WASM_BASE}/WasmPlayer.js`;
-                    document.head.appendChild(playerScript);
-
-                    playerScript.onload = async () => {
-                        statusEl.textContent = 'Player script loaded. Starting engine...';
-                        loadingOverlay.textContent = 'Starting engine...';
-                        try {
-                            // 4. Attempt to create the web client.
-                            // The loader may have modified or wrapped this function.
-                            await window.Roblox.WasmPlayer.createWebClient({
-                                container: document.getElementById('canvas'),
-                                baseUrl: WASM_BASE,
-                                joinScriptUrl: joinScriptUrl,
-                                launchData: { joinScriptUrl: joinScriptUrl }
-                            });
-                            statusEl.textContent = 'Game launched.';
-                            loadingOverlay.style.display = 'none';
-                        } catch (err) {
-                            console.error('[WASM Player] Launch error:', err);
-                            statusEl.textContent = 'Launch failed: ' + err.message;
-                            loadingOverlay.textContent = 'Launch failed. Check console.';
-                        }
-                    };
-                    playerScript.onerror = () => {
-                        statusEl.textContent = 'Failed to load WasmPlayer.js.';
-                        loadingOverlay.textContent = 'Failed to load player script.';
-                    };
+        // 2. Fetch the WasmLoader.js script with a spoofed referrer to bypass the 403.
+        async function loadScriptWithReferrer(url) {
+            statusEl.textContent = `Fetching ${url.split('/').pop()}...`;
+            try {
+                const response = await fetch(url, {
+                    referrer: REFERRER,
+                    referrerPolicy: 'unsafe-url',
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status} for ${url}`);
                 }
-            }, 100); // Check every 100ms for the context object.
-        };
+                const scriptText = await response.text();
+                const blob = new Blob([scriptText], { type: 'application/javascript' });
+                const blobUrl = URL.createObjectURL(blob);
 
-        loaderScript.onerror = () => {
-            statusEl.textContent = 'Failed to load WasmLoader.js.';
-            loadingOverlay.textContent = 'Failed to load loader script.';
-        };
+                const script = document.createElement('script');
+                script.src = blobUrl;
+                document.head.appendChild(script);
+
+                // Return a promise that resolves when the script has loaded.
+                return new Promise((resolve, reject) => {
+                    script.onload = resolve;
+                    script.onerror = reject;
+                });
+            } catch (err) {
+                console.error(`[WASM Player] Failed to load ${url}:`, err);
+                throw err;
+            }
+        }
+
+        // 3. Main initialization flow.
+        (async () => {
+            try {
+                // Load the loader script first using our secure fetch.
+                await loadScriptWithReferrer(`${WASM_BASE}/WasmLoader.js`);
+                console.log('[WASM Player] WasmLoader.js loaded successfully.');
+
+                // Wait for the loader to set up its context.
+                await new Promise(resolve => {
+                    const interval = setInterval(() => {
+                        if (window.__wasmLoaderContext) {
+                            clearInterval(interval);
+                            resolve();
+                        }
+                    }, 100);
+                });
+                console.log('[WASM Player] __wasmLoaderContext is ready.');
+
+                // Load the player script, also with the spoofed referrer.
+                await loadScriptWithReferrer(`${WASM_BASE}/WasmPlayer.js`);
+                console.log('[WASM Player] WasmPlayer.js loaded successfully.');
+
+                // Now, attempt to launch the game.
+                statusEl.textContent = 'Starting engine...';
+                loadingOverlay.textContent = 'Starting engine...';
+                await window.Roblox.WasmPlayer.createWebClient({
+                    container: document.getElementById('canvas'),
+                    baseUrl: WASM_BASE,
+                    joinScriptUrl: joinScriptUrl,
+                    launchData: { joinScriptUrl: joinScriptUrl }
+                });
+                statusEl.textContent = 'Game launched.';
+                loadingOverlay.style.display = 'none';
+
+            } catch (err) {
+                console.error('[WASM Player] Launch error:', err);
+                statusEl.textContent = 'Launch failed: ' + err.message;
+                loadingOverlay.textContent = 'Launch failed. Check console.';
+            }
+        })();
     </script>
 </body>
 </html>
