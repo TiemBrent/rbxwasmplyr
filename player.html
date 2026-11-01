@@ -5,17 +5,55 @@
     <title>Roblox WASM Player</title>
     <style>
         body { margin: 0; overflow: hidden; background: #000; }
-        #player { width: 100vw; height: 100vh; }
-        #status { position: absolute; top: 10px; left: 10px; color: #fff; font-family: sans-serif; background: rgba(0,0,0,0.5); padding: 5px 10px; border-radius: 4px; }
+        #canvas { width: 100vw; height: 100vh; display: block; }
+        #loading-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0,0,0,0.8);
+            color: #fff;
+            font-family: sans-serif;
+            font-size: 20px;
+        }
+        #status {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            color: #fff;
+            font-family: sans-serif;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        /* Hidden elements required by WasmPlayer.js */
+        #input-container, #server, #proxyenabled { display: none; }
     </style>
 </head>
 <body>
-    <div id="player"></div>
-    <div id="status">Loading engine...</div>
+    <!-- Main rendering surface -->
+    <canvas id="canvas"></canvas>
+
+    <!-- Required by WasmPlayer.js for its internal loading screen logic -->
+    <div id="loading-overlay">Loading Roblox...</div>
+
+    <!-- Status display -->
+    <div id="status"></div>
+
+    <!-- Required by WasmPlayer.js for virtual keyboard / input handling -->
+    <div id="input-container">
+        <textarea id="input-textarea"></textarea>
+        <input id="input-input" />
+    </div>
+
+    <!-- Required by WasmPlayer.js for network info display -->
+    <div id="server"></div>
+    <div id="proxyenabled"></div>
 
     <script>
         const statusEl = document.getElementById('status');
-        const playerEl = document.getElementById('player');
+        const loadingOverlay = document.getElementById('loading-overlay');
 
         // 1. Get the joinScriptUrl from the query string.
         const params = new URLSearchParams(window.location.search);
@@ -23,6 +61,7 @@
 
         if (!joinScriptUrl) {
             statusEl.textContent = 'Error: No joinScriptUrl provided.';
+            loadingOverlay.textContent = 'Missing join script.';
             throw new Error('Missing joinScriptUrl');
         }
 
@@ -36,6 +75,7 @@
 
         script.onload = async () => {
             statusEl.textContent = 'Engine loaded. Starting...';
+            loadingOverlay.textContent = 'Starting engine...';
 
             // Wait for the global Roblox object to appear.
             await new Promise(resolve => {
@@ -48,11 +88,10 @@
             });
 
             try {
-                // 3. Attempt to create the web client with the provided joinScriptUrl.
-                // The exact configuration may need adjustment based on the engine version.
-                // We pass the URL in multiple plausible fields.
+                // 3. Create the web client with the provided joinScriptUrl.
+                // We pass the URL in multiple plausible fields to maximize compatibility.
                 await window.Roblox.WasmPlayer.createWebClient({
-                    container: playerEl,
+                    container: document.getElementById('canvas'), // The canvas is the main render target
                     baseUrl: WASM_BASE,
                     joinScriptUrl: joinScriptUrl,
                     launchData: {
@@ -60,14 +99,17 @@
                     }
                 });
                 statusEl.textContent = 'Game launched.';
+                loadingOverlay.style.display = 'none'; // Hide overlay once launched
             } catch (err) {
                 console.error('[WASM Player] Launch error:', err);
                 statusEl.textContent = 'Launch failed: ' + err.message;
+                loadingOverlay.textContent = 'Launch failed. Check console.';
             }
         };
 
         script.onerror = () => {
             statusEl.textContent = 'Failed to load the WASM engine script.';
+            loadingOverlay.textContent = 'Failed to load engine.';
         };
     </script>
 </body>
