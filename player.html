@@ -15,7 +15,7 @@
       background: #111; color: #fff; font-family: sans-serif; z-index: 100;
     }
     #loading-overlay.hidden { display: none; }
-    #status { margin-bottom: 20px; font-size: 1.2rem; }
+    #status { margin-bottom: 20px; font-size: 1.2rem; text-align: center; max-width: 80%; }
     #input-container { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 50; }
     #input-textarea { width: 300px; height: 40px; padding: 8px; font-size: 1rem; }
     #input-input { display: none; }
@@ -56,25 +56,51 @@
       }
 
       // ---------------------------------------------------------------
-      // 1. Dynamic version fetch – try several Roblox endpoints
+      // 1. Dynamic version fetch (with localStorage cache)
       // ---------------------------------------------------------------
+      const VERSION_CACHE_KEY = "rbx_webclient_version_v1";
+      const VERSION_CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+      const FALLBACK_VERSION = "version-75f1039cb4964863-RobloxWebClient";
+
       /**
        * Returns the full web-client version string, e.g.:
        *   "version-75f1039cb4964863-RobloxWebClient"
        *
-       * The primary source is the ClientSettings CDN
-       * (clientsettingscdn.roblox.com).  We also try the generic
-       * setup.rbxcdn.com/version endpoint as a fallback.
+       * Strategy:
+       *   1. Read cached version from localStorage if fresh (< 6 h old)
+       *   2. Try clientsettingscdn.roblox.com (WebPlayer)
+       *   3. Try clientsettingscdn.roblox.com (WindowsPlayer)
+       *   4. Try setup.rbxcdn.com/version (plain text)
+       *   5. Fall back to hard-coded version from the last known good build
+       *
+       * Caching matters because the joinScriptUrl expires quickly — we
+       * don't want a cold network round-trip eating into the window.
        */
       async function fetchWebClientVersion() {
-        // Helper to extract the hash from a JSON response
+        // ---- 1. Cache lookup ----
+        try {
+          const cached = JSON.parse(
+            localStorage.getItem(VERSION_CACHE_KEY) || "null"
+          );
+          if (
+            cached &&
+            cached.v &&
+            typeof cached.t === "number" &&
+            Date.now() - cached.t < VERSION_CACHE_TTL_MS
+          ) {
+            console.log("[player] Using cached version:", cached.v);
+            return cached.v;
+          }
+        } catch (_) {
+          /* corrupt cache — ignore and refetch */
+        }
+
+        let result = null;
+
         const extractFromJson = (data) => {
-          // The ClientSettings endpoint returns a property called
-          // clientVersionUpload (e.g. "version-75f1039cb4964863")
           if (data && data.clientVersionUpload) {
             return data.clientVersionUpload + "-RobloxWebClient";
           }
-          // Some endpoints may return a plain string or version field
           if (typeof data === "string" && data.startsWith("version-")) {
             return data + "-RobloxWebClient";
           }
@@ -84,60 +110,83 @@
           return null;
         };
 
-        // Attempt #1 – ClientSettings CDN (WebPlayer)
+        // ---- 2. Attempt #1 – WebPlayer ----
         try {
           const res = await fetch(
             "https://clientsettingscdn.roblox.com/v2/client-version/WebPlayer",
             { headers: { Accept: "application/json" } }
           );
           if (res.ok) {
-            const json = await res.json();
-            const v = extractFromJson(json);
-            if (v) return v;
+            const v = extractFromJson(await res.json());
+            if (v) result = v;
           }
-        } catch (_) { /* network error – try next */ }
+        } catch (_) {
+          /* network error — try next */
+        }
 
-        // Attempt #2 – ClientSettings CDN (WindowsPlayer – often works as a fallback)
-        try {
-          const res = await fetch(
-            "https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer",
-            { headers: { Accept: "application/json" } }
-          );
-          if (res.ok) {
-            const json = await res.json();
-            const v = extractFromJson(json);
-            if (v) return v;
-          }
-        } catch (_) { /* ignore */ }
-
-        // Attempt #3 – generic setup.rbxcdn.com/version
-        try {
-          const res = await fetch("https://setup.rbxcdn.com/version", {
-            headers: { Accept: "text/plain" },
-          });
-          if (res.ok) {
-            const text = (await res.text()).trim();
-            if (text.startsWith("version-")) {
-              return text + "-RobloxWebClient";
+        // ---- 3. Attempt #2 – WindowsPlayer ----
+        if (!result) {
+          try {
+            const res = await fetch(
+              "https://clientsettingscdn.roblox.com/v2/client-version/WindowsPlayer",
+              { headers: { Accept: "application/json" } }
+            );
+            if (res.ok) {
+              const v = extractFromJson(await res.json());
+              if (v) result = v;
             }
+          } catch (_) {
+            /* ignore */
           }
-        } catch (_) { /* ignore */ }
+        }
 
-        // Hard-coded fallback – the version from your latest error log
-        console.warn(
-          "Dynamic version fetch failed – using hard-coded fallback."
-        );
-        return "version-75f1039cb4964863-RobloxWebClient";
+        // ---- 4. Attempt #3 – setup.rbxcdn.com/version ----
+        if (!result) {
+          try {
+            const res = await fetch("https://setup.rbxcdn.com/version", {
+              headers: { Accept: "text/plain" },
+            });
+            if (res.ok) {
+              const text = (await res.text()).trim();
+              if (text.startsWith("version-")) {
+                result = text + "-RobloxWebClient";
+              }
+            }
+          } catch (_) {
+            /* ignore */
+          }
+        }
+
+        // ---- 5. Fallback ----
+        if (!result) {
+          console.warn(
+            "[player] Dynamic version fetch failed — using fallback:",
+            FALLBACK_VERSION
+          );
+          result = FALLBACK_VERSION;
+        }
+
+        // ---- 6. Persist to cache ----
+        try {
+          localStorage.setItem(
+            VERSION_CACHE_KEY,
+            JSON.stringify({ v: result, t: Date.now() })
+          );
+        } catch (_) {
+          /* quota / private mode — non-fatal */
+        }
+
+        return result;
       }
 
       // ---------------------------------------------------------------
       // 2. Resolve the WASM script URLs (served from YOUR origin)
       // ---------------------------------------------------------------
-      // If you host the republished scripts in a sub-folder, change this.
-      const WASM_BASE = ""; // e.g. "/wasm/" if you put them in a folder
+      // If you host the republished scripts in a sub-folder, change this
+      // to e.g. "/wasm/".
+      const WASM_BASE = "";
 
       function scriptUrl(filename) {
-        // Relative path → works on GitHub Pages, localhost, etc.
         return WASM_BASE + filename;
       }
 
@@ -179,53 +228,50 @@
       // 5. Main boot sequence
       // ---------------------------------------------------------------
       try {
-        // --- 5a. Show status ---
         const statusEl = document.getElementById("status");
 
-        // --- 5b. Fetch the current web-client version ---
+        // --- 5a. Fetch the current web-client version ---
         statusEl.textContent = "Fetching web-client version…";
         const version = await fetchWebClientVersion();
-        console.log("Using web-client version:", version);
+        console.log("[player] Using web-client version:", version);
 
-        // --- 5c. Build the final script URLs ---
+        // --- 5b. Build the final script URLs ---
         //   Example: /webclient/version-…-RobloxWebClient/WasmLoader.js
-        const versionBase = `/webclient/${version}/`; // adjust if your folder layout differs
+        const versionBase = `/webclient/${version}/`;
         const loaderUrl = scriptUrl(versionBase + "WasmLoader.js");
         const playerUrl = scriptUrl(versionBase + "WasmPlayer.js");
 
-        // --- 5d. Load WasmLoader.js FIRST ---
+        // --- 5c. Load WasmLoader.js FIRST ---
         statusEl.textContent = "Loading WasmLoader.js…";
         await loadScript(loaderUrl);
 
-        // --- 5e. Wait for __wasmLoaderContext (critical) ---
+        // --- 5d. Wait for __wasmLoaderContext (critical) ---
         statusEl.textContent = "Waiting for WasmLoader context…";
         await waitForGlobal("__wasmLoaderContext");
 
-        // --- 5f. Load WasmPlayer.js SECOND ---
+        // --- 5e. Load WasmPlayer.js SECOND ---
         statusEl.textContent = "Loading WasmPlayer.js…";
         await loadScript(playerUrl);
 
-        // --- 5g. Wait for createWebClient to be defined ---
+        // --- 5f. Wait for createWebClient to be defined ---
         statusEl.textContent = "Waiting for engine…";
         await waitForGlobal("createWebClient");
 
-        // --- 5h. Launch! ---
+        // --- 5g. Launch ---
         statusEl.textContent = "Launching game…";
 
-        // Hide the loading overlay once the engine is ready
         document
           .getElementById("loading-overlay")
           .classList.add("hidden");
 
-        // The exact signature required by the WASM client
         window.createWebClient({
           joinScriptUrl: joinScriptUrl,
           launchData: { joinScriptUrl: joinScriptUrl },
         });
 
-        console.log("✅ createWebClient() invoked.");
+        console.log("[player] createWebClient() invoked.");
       } catch (err) {
-        console.error("Boot failed:", err);
+        console.error("[player] Boot failed:", err);
         document.getElementById("status").textContent =
           "❌ " + err.message;
       }
