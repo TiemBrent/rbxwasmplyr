@@ -27,29 +27,12 @@
             padding: 5px 10px;
             border-radius: 4px;
         }
-        /* Hidden elements required by WasmPlayer.js */
-        #input-container, #server, #proxyenabled { display: none; }
     </style>
 </head>
 <body>
-    <!-- Main rendering surface -->
     <canvas id="canvas"></canvas>
-
-    <!-- Required by WasmPlayer.js for its internal loading screen logic -->
     <div id="loading-overlay">Loading Roblox...</div>
-
-    <!-- Status display -->
     <div id="status"></div>
-
-    <!-- Required by WasmPlayer.js for virtual keyboard / input handling -->
-    <div id="input-container">
-        <textarea id="input-textarea"></textarea>
-        <input id="input-input" />
-    </div>
-
-    <!-- Required by WasmPlayer.js for network info display -->
-    <div id="server"></div>
-    <div id="proxyenabled"></div>
 
     <script>
         const statusEl = document.getElementById('status');
@@ -64,52 +47,61 @@
             loadingOverlay.textContent = 'Missing join script.';
             throw new Error('Missing joinScriptUrl');
         }
-
         console.log('[WASM Player] Received joinScriptUrl:', joinScriptUrl);
 
-        // 2. Load the Roblox WASM engine from the CDN.
         const WASM_BASE = 'https://setup.rbxcdn.com/webclient/version-75f1039cb4964863-RobloxWebClient';
-        const script = document.createElement('script');
-        script.src = `${WASM_BASE}/WasmPlayer.js`;
-        document.head.appendChild(script);
 
-        script.onload = async () => {
-            statusEl.textContent = 'Engine loaded. Starting...';
-            loadingOverlay.textContent = 'Starting engine...';
+        // 2. Load the WasmLoader.js script FIRST.
+        const loaderScript = document.createElement('script');
+        loaderScript.src = `${WASM_BASE}/WasmLoader.js`;
+        document.head.appendChild(loaderScript);
 
-            // Wait for the global Roblox object to appear.
-            await new Promise(resolve => {
-                const interval = setInterval(() => {
-                    if (window.Roblox && window.Roblox.WasmPlayer) {
-                        clearInterval(interval);
-                        resolve();
-                    }
-                }, 100);
-            });
+        loaderScript.onload = () => {
+            statusEl.textContent = 'Loader script loaded. Initializing...';
+            loadingOverlay.textContent = 'Initializing engine...';
 
-            try {
-                // 3. Create the web client with the provided joinScriptUrl.
-                // We pass the URL in multiple plausible fields to maximize compatibility.
-                await window.Roblox.WasmPlayer.createWebClient({
-                    container: document.getElementById('canvas'), // The canvas is the main render target
-                    baseUrl: WASM_BASE,
-                    joinScriptUrl: joinScriptUrl,
-                    launchData: {
-                        joinScriptUrl: joinScriptUrl
-                    }
-                });
-                statusEl.textContent = 'Game launched.';
-                loadingOverlay.style.display = 'none'; // Hide overlay once launched
-            } catch (err) {
-                console.error('[WASM Player] Launch error:', err);
-                statusEl.textContent = 'Launch failed: ' + err.message;
-                loadingOverlay.textContent = 'Launch failed. Check console.';
-            }
+            // The loader sets up window.__wasmLoaderContext. We wait for it to appear.
+            const waitForContext = setInterval(() => {
+                if (window.__wasmLoaderContext) {
+                    clearInterval(waitForContext);
+                    console.log('[WASM Player] __wasmLoaderContext is ready.');
+                    
+                    // 3. Now it is safe to load WasmPlayer.js.
+                    const playerScript = document.createElement('script');
+                    playerScript.src = `${WASM_BASE}/WasmPlayer.js`;
+                    document.head.appendChild(playerScript);
+
+                    playerScript.onload = async () => {
+                        statusEl.textContent = 'Player script loaded. Starting engine...';
+                        loadingOverlay.textContent = 'Starting engine...';
+                        try {
+                            // 4. Attempt to create the web client.
+                            // The loader may have modified or wrapped this function.
+                            await window.Roblox.WasmPlayer.createWebClient({
+                                container: document.getElementById('canvas'),
+                                baseUrl: WASM_BASE,
+                                joinScriptUrl: joinScriptUrl,
+                                launchData: { joinScriptUrl: joinScriptUrl }
+                            });
+                            statusEl.textContent = 'Game launched.';
+                            loadingOverlay.style.display = 'none';
+                        } catch (err) {
+                            console.error('[WASM Player] Launch error:', err);
+                            statusEl.textContent = 'Launch failed: ' + err.message;
+                            loadingOverlay.textContent = 'Launch failed. Check console.';
+                        }
+                    };
+                    playerScript.onerror = () => {
+                        statusEl.textContent = 'Failed to load WasmPlayer.js.';
+                        loadingOverlay.textContent = 'Failed to load player script.';
+                    };
+                }
+            }, 100); // Check every 100ms for the context object.
         };
 
-        script.onerror = () => {
-            statusEl.textContent = 'Failed to load the WASM engine script.';
-            loadingOverlay.textContent = 'Failed to load engine.';
+        loaderScript.onerror = () => {
+            statusEl.textContent = 'Failed to load WasmLoader.js.';
+            loadingOverlay.textContent = 'Failed to load loader script.';
         };
     </script>
 </body>
