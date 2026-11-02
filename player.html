@@ -68,10 +68,12 @@
     </div>
   </div>
 
+  <!-- 1. Host config -->
   <script>
     window.robloxWasmHostConfig = { server: 'prod' };
   </script>
 
+  <!-- 2. Fetch wrapper + Wisp worker -->
   <script>
   (function () {
     'use strict';
@@ -80,8 +82,6 @@
     const log = (...a) => console.log(...a);
     const dbg = (...a) => { if (DEBUG) console.log(...a); };
 
-    // Only the locale endpoint is mocked now.
-    // economy and universes are unmocked so the real ownership/asset data comes through.
     const TOLERANT_PATTERNS = ['locale.roblox.com/'];
     const ROBLOX_DOMAINS = ['roblox.com','rbxcdn.com','robloxlabs.com','rbxcloud.com'];
     const isRobloxUrl = (url) => {
@@ -96,24 +96,6 @@
           { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
-    }
-
-    // Intercept economy.roblox.com/v2/assets/*/details and force IsOwned: true.
-    // This is the cheap test: if the engine is gating on IsOwned, this flips it.
-    async function handleAssetDetails(url, res) {
-      try {
-        const text = await res.text();
-        let body;
-        try { body = JSON.parse(text); } catch { return new Response(text, { status: res.status, headers: res.headers }); }
-        console.log('[OWNED-PATCH] original IsOwned=' + body.IsOwned + ' -> forcing true');
-        body.IsOwned = true;
-        if (!body.Creator) body.Creator = { Id: 1, Name: 'Test', CreatorType: 'User' };
-        if (!body.CreatorTargetId) body.CreatorTargetId = 1;
-        return new Response(JSON.stringify(body), { status: res.status, headers: { 'Content-Type': 'application/json' } });
-      } catch (e) {
-        console.error('[OWNED-PATCH] failed:', e);
-        return res;
-      }
     }
 
     const wispUrl = 'wss://epoxy-wisp-server.onrender.com';
@@ -162,13 +144,6 @@
         try {
           const res = await proxyFetch(url, req.method, [...req.headers], body);
           dbg('[FETCH] ← ' + res.status + ' (wisp) ' + req.method + ' ' + url);
-
-          // Force IsOwned: true on asset-details responses so the engine
-          // believes the account owns the place.
-          if (url.includes('economy.roblox.com/v2/assets/') && url.includes('/details')) {
-            return await handleAssetDetails(url, res);
-          }
-
           return res;
         } catch (e) {
           log('[FETCH] proxy failed for ' + url + ': ' + ((e && e.message) || e));
@@ -184,6 +159,7 @@
   })();
   </script>
 
+  <!-- 3. WasmPlayer.js on-the-fly patch (force set_place_id from URL) -->
   <script>
   (function () {
     'use strict';
@@ -232,6 +208,73 @@
   })();
   </script>
 
+  <!-- 4. Stack-trace hook: capture WASM call stacks when launch/join decisions log -->
+  <script>
+  (function () {
+    'use strict';
+    const log = (...a) => console.log.apply(console, a);
+    const origLog = console.log.bind(console);
+
+    const TRIGGERS = [
+      'launchUGCGame',
+      'launchGame',
+      'gamejoin',
+      'starter place',
+      'Failed to fetch starter place',
+      'Not authorized to join',
+      'InExperience',
+      'Recursively join',
+    ];
+
+    function logStack(label, msg) {
+      origLog.call(console,
+        '%c[STACK-TRACE] ' + label + ' msg="' + String(msg).slice(0, 140) + '"',
+        'color:#0ff;font-weight:bold');
+      origLog.call(console, new Error('STACK').stack);
+    }
+
+    // Hook 1: console.log
+    console.log = function (...args) {
+      const msg = args.map(a => typeof a === 'string' ? a : String(a)).join(' ');
+      const hit = TRIGGERS.find(t => msg.includes(t));
+      if (hit) logStack('console.log', msg);
+      return origLog.apply(console, args);
+    };
+
+    // Hook 2: Module.print — engine may bypass console.log
+    const poll = setInterval(() => {
+      const M = window.Module;
+      if (!M) return;
+      if (typeof M.print === 'function' && !M.__stackHooked) {
+        const origPrint = M.print;
+        M.print = function (...args) {
+          const msg = args.map(String).join(' ');
+          const hit = TRIGGERS.find(t => msg.includes(t));
+          if (hit) logStack('Module.print', msg);
+          return origPrint.apply(this, args);
+        };
+        M.__stackHooked = true;
+        origLog.call(console, '%c[HOOK] Module.print hooked',
+          'color:#0f0;font-weight:bold');
+      }
+      if (typeof M.setStatus === 'function' && !M.__statusHooked) {
+        const origStatus = M.setStatus;
+        M.setStatus = function (...args) {
+          const msg = args.map(String).join(' ');
+          const hit = TRIGGERS.find(t => msg.includes(t));
+          if (hit) logStack('Module.setStatus', msg);
+          return origStatus.apply(this, args);
+        };
+        M.__statusHooked = true;
+      }
+    }, 100);
+
+    origLog.call(console, '%c[HOOK] console.log hooked',
+      'color:#0f0;font-weight:bold');
+  })();
+  </script>
+
+  <!-- 5. Official loader -->
   <script src="./WasmLoader.js"></script>
 </body>
 </html>
