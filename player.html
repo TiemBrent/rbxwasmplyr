@@ -54,8 +54,6 @@
     #loading-error-code { font-size: 12px; color: #666; margin-bottom: 20px; }
     .btn { padding: 8px 20px; border: 1px solid #444; border-radius: 6px; background: #222; color: #eee; font-size: 14px; cursor: pointer; margin: 0 4px; }
     .btn:hover { background: #333; }
-
-    /* Hidden status mirrors used by WasmPlayer.js */
     #server,
     #proxyenabled {
       position: absolute;
@@ -64,7 +62,6 @@
       clip: rect(0 0 0 0);
       white-space: nowrap;
     }
-
     #loading-cancel { margin-top: 16px; }
   </style>
 </head>
@@ -98,9 +95,30 @@
     </div>
   </div>
 
+  <!-- 1. Host config — runs FIRST, before WasmLoader.js.
+       placeId must be here, not just in the URL, so WasmLoader populates
+       the `c` arg that WasmPlayer.js passes to set_place_id(). -->
   <script>
-    window.robloxWasmHostConfig = { server: 'prod' };
+  (function () {
+    const params = new URLSearchParams(location.search);
+    const rawPlace = params.get('placeId');
+    const placeId = rawPlace ? Number(rawPlace) : undefined;
+
+    window.robloxWasmHostConfig = {
+      server: 'prod',
+      placeId: placeId,
+      // belt-and-suspenders: if WasmLoader uses a different key name,
+      // these cover the common variants.
+      placeID: placeId,
+      startPlaceId: placeId,
+      universeId: params.get('universeId') ? Number(params.get('universeId')) : undefined,
+    };
+
+    console.log('[HOSTCONFIG]', window.robloxWasmHostConfig);
+  })();
   </script>
+
+  <!-- 2. Fetch wrapper + Wisp worker (unchanged, working) -->
   <script>
   (function () {
     'use strict';
@@ -108,9 +126,11 @@
     const DEBUG = params.has('debug');
     const log = (...a) => console.log(...a);
     const dbg = (...a) => { if (DEBUG) console.log(...a); };
+
     const TOLERANT_PATTERNS = ['economy.roblox.com/v2/assets/','apis.roblox.com/universes/','locale.roblox.com/'];
     const ROBLOX_DOMAINS = ['roblox.com','rbxcdn.com','robloxlabs.com','rbxcloud.com'];
     const isRobloxUrl = (url) => { try { const h = new URL(url).hostname; return ROBLOX_DOMAINS.some(d => h === d || h.endsWith('.' + d)); } catch { return false; } };
+
     function mockResponse(url) {
       let body = { mocked: true, url };
       if (url.includes('economy.roblox.com/v2/assets/')) body = { AssetTypeId: 10, IsOwned: false, Name: 'Mocked Asset' };
@@ -118,11 +138,13 @@
       else if (url.includes('locale.roblox.com/')) body = { locale: 'en_US', language: 'en' };
       return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
+
     const wispUrl = 'wss://epoxy-wisp-server.onrender.com';
     const worker = new Worker('./epoxy-worker.js', { type: 'module' });
     let readyResolve;
     const workerReadyPromise = new Promise((r) => { readyResolve = r; });
     const pending = new Map(); let nextId = 1;
+
     worker.onmessage = (event) => {
       const msg = event.data; if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'ready') { log('[WISP] Connected. Wisp fetch wrapper active.'); readyResolve(); return; }
@@ -135,9 +157,15 @@
       }
     };
     worker.onerror = (e) => { log('[WISP] Worker onerror:', (e && e.message) || e); };
+
     function proxyFetch(url, method, headers, body) {
-      return new Promise((resolve, reject) => { const id = nextId++; pending.set(id, { resolve, reject, url }); worker.postMessage({ type: 'fetch', id, url, method, headers, body }, body ? [body] : []); });
+      return new Promise((resolve, reject) => {
+        const id = nextId++;
+        pending.set(id, { resolve, reject, url });
+        worker.postMessage({ type: 'fetch', id, url, method, headers, body }, body ? [body] : []);
+      });
     }
+
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async function (input, init = {}) {
       let req; try { req = input instanceof Request ? input : new Request(input, init); } catch { return nativeFetch(input, init); }
@@ -151,16 +179,13 @@
       }
       return nativeFetch(req);
     };
+
     worker.postMessage({ type: 'init', wispUrl });
     window.__rbxwasm = { worker, proxyFetch, isRobloxUrl, TOLERANT_PATTERNS };
   })();
   </script>
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      const script = document.createElement('script');
-      script.src = './WasmLoader.js';
-      document.head.appendChild(script);
-    });
-  </script>
+
+  <!-- 3. Load the official loader. It resolves the engine and injects WasmPlayer.js. -->
+  <script src="./WasmLoader.js"></script>
 </body>
 </html>
