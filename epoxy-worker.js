@@ -1,6 +1,5 @@
 // epoxy-worker.js
 // Runs Epoxy inside a module Web Worker.
-// Requires COOP/COEP isolation (coi-serviceworker.js) so SharedArrayBuffer is available.
 
 import init, {
   EpoxyClient,
@@ -13,10 +12,8 @@ self.onmessage = async (event) => {
   const msg = event.data;
   if (!msg || typeof msg !== 'object') return;
 
-  // ---- init ----
   if (msg.type === 'init') {
     try {
-      // For the bundled version, init() takes no arguments.
       await init();
 
       const options = new EpoxyClientOptions();
@@ -37,15 +34,36 @@ self.onmessage = async (event) => {
     return;
   }
 
-  // ---- fetch ----
   if (msg.type === 'fetch') {
-    const { id, url, method, headers, body } = msg;
+    const { id, url, method, headers, body, bodyIsText } = msg;
     try {
       if (!client) throw new Error('Epoxy client not initialized');
 
       const init = { method: method || 'GET' };
-      if (headers && headers.length) init.headers = new Headers(headers);
-      if (body) init.body = body;
+
+      if (headers && headers.length) {
+        init.headers = new Headers(headers);
+      }
+
+      if (body != null) {
+        // KEY FIX: if the caller marked this as text, pass a string so
+        // Epoxy forwards the Content-Type header instead of overwriting
+        // it with application/octet-stream for binary bodies.
+        if (bodyIsText) {
+          init.body = new TextDecoder().decode(body);
+        } else {
+          init.body = body;
+        }
+      }
+
+      // Belt-and-suspenders: if a Content-Type was provided but Epoxy
+      // still drops it for some reason, force it back on the request.
+      // (This is the header that was arriving as `undefined` in httpbin.)
+      const ct = init.headers ? init.headers.get('content-type') : null;
+      if (ct && bodyIsText) {
+        // Redundant with the string body, but harmless.
+        init.headers.set('content-type', ct);
+      }
 
       const res = await client.fetch(url, init);
       const buf = await res.arrayBuffer();
