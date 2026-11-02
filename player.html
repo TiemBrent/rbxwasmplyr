@@ -87,23 +87,28 @@
 <div id="netlog"></div>
 
 <!-- ======================================================================
-     1. CROSS-ORIGIN ISOLATION (must run first)
-     GitHub Pages cannot set COOP/COEP headers. coi-serviceworker.js
-     registers a service worker that adds them client-side.
-     The page reloads once on first visit; subsequent loads are isolated.
+     1. CROSS-ORIGIN ISOLATION
      ====================================================================== -->
 <script src="./coi-serviceworker.js"></script>
 
 <!-- ======================================================================
-     2. NETWORK TRACER + CORS TOLERANCE
+     2. WISP CLIENT
+     Must be in the same folder. If the file is an ES module (has
+     "export" statements), change to <script type="module"> and adjust
+     the loader below. This block tries both classic script and module.
+     ====================================================================== -->
+<script src="./wisp-client.js"></script>
+
+<!-- ======================================================================
+     3. NETWORK TRACER + WISP PROXY + CORS TOLERANCE
      Runs before WasmLoader.js / WasmPlayer.js / WebClient.js.
-     - Logs every fetch/XHR/WS to *.roblox.com / *.rbxcdn.com / *.robloxlabs.com
-     - Intercepts known non-fatal CORS failures on loading-screen metadata
-       endpoints and returns a mock JSON 200 so the engine does not abort.
-     Pass ?debug=1 to mirror the log into an on-screen overlay.
      ====================================================================== -->
 <script>
 (function () {
+  // ============ CONFIGURATION ============
+  const WISP_SERVER_URL = 'wss://epoxy-wisp-server.onrender.com/';
+
+  // ============ LOGGING ============
   const params = new URLSearchParams(location.search);
   const showOverlay = params.get('debug') === '1';
   const logEl = document.getElementById('netlog');
@@ -142,32 +147,23 @@
     try { return short(await res.clone().text(), 700); } catch (e) { return `[read err: ${e.message}]`; }
   }
 
-  // ---- Endpoints we tolerate CORS failure on -----------------------------
-  // These are the loading-screen / telemetry / analytics calls that fail
-  // because GitHub Pages origin is not in Roblox's Access-Control-Allow-Origin.
-  // They are NOT the join gate. Suppressing them lets the engine boot cleanly
-  // past launchUGCGame without crashing, so we can see the actual join
-  // authorization flow that comes after.
-  //
-  // Everything else (auth.roblox.com, gamejoin.roblox.com, etc.) is left
-  // untouched so we can observe the real 524 / status-12 rejections.
+  // ============ CORS-TOLERANT ENDPOINTS ============
   const TOLERANT_PATTERNS = [
-    /\/universes\/v1\/places\/[^/]+\/universe/,                    // game metadata
-    /\/v1\/locales\/user-localization-locus-supported-locales/,    // locale
-    /\/v2\/assets\/[^/]+\/details/,                                 // game details
-    /experience-signals-ingest/,                                    // telemetry
-    /ephemeralcounters\.api\.roblox\.com/,                          // counters
-    /ecsv2\.roblox\.com\/(?:timespent|client)\/pbe/,               // rbe analytics
-    /sentry-relay\.rbxinfra\.com/,                                  // crash reporter
-    /metrics\.roblox\.com/,                                         // metrics
-    /\/v1\/thumbnails/,                                             // thumbnails (loading screen)
-    /\/v1\/games\/icons/,                                           // icon
-    /\/v1\/games\/multiget\/thumbnails/,                            // artwork
-    /\/beacon-api\//,                                               // beacon
+    /\/universes\/v1\/places\/[^/]+\/universe/,
+    /\/v1\/locales\/user-localization-locus-supported-locales/,
+    /\/v2\/assets\/[^/]+\/details/,
+    /experience-signals-ingest/,
+    /ephemeralcounters\.api\.roblox\.com/,
+    /ecsv2\.roblox\.com\/(?:timespent|client)\/pbe/,
+    /sentry-relay\.rbxinfra\.com/,
+    /metrics\.roblox\.com/,
+    /\/v1\/thumbnails/,
+    /\/v1\/games\/icons/,
+    /\/v1\/games\/multiget\/thumbnails/,
+    /\/beacon-api\//,
   ];
   const isTolerant = (u) => TOLERANT_PATTERNS.some((re) => re.test(u));
 
-  // Heuristic mock body — enough shape for the engine to not fall over.
   function mockBodyFor(url) {
     if (/\/universes\/v1\/places\//.test(url)) return JSON.stringify({ universeId: null });
     if (/\/v1\/locales\//.test(url)) return JSON.stringify({ generalExperience: { locale: 'en_us' }, ugc: { locale: 'en_us' } });
@@ -175,51 +171,171 @@
     return JSON.stringify({});
   }
 
-  // ---- fetch --------------------------------------------------------------
-  const _fetch = window.fetch.bind(window);
-  window.fetch = async function (input, init) {
-    let url = '', method = 'GET', body = null;
-    try {
-      url    = typeof input === 'string' ? input : (input && input.url) || '';
-      method = (init && init.method) || (input && input.method) || 'GET';
-      body   = init && init.body;
-    } catch {}
+  // ============ WISP PROXY SETUP ============
+  const originalFetch = window.fetch.bind(window);
+  let wispClient = null;
+  let wispReady = false;
 
-    const hot = isRbx(url);
-    if (hot) {
-      emit('sys', 'FETCH', `→ ${method} ${url}`);
-      if (body && typeof body === 'string') emit('req', 'FETCH', `  req: ${short(body, 400)}`);
+  // Try to detect the wisp-client API shape
+  function tryCreateWispClient() {
+    const candidates = ['ClientConnection', 'WispClient', 'EpoxyClient', 'default'];
+    if (typeof wisp_client === 'undefined') {
+      emit('err', 'WISP', 'wisp-client.js did not define a global "wisp_client".');
+      emit('warn', 'WISP', 'If the file uses ES modules, add a module shim (see player.html comments).');
+      return null;
     }
 
-    try {
-      const res = await _fetch(input, init);
+    for (const name of candidates) {
+      const ctor = wisp_client[name];
+      if (typeof ctor === 'function') {
+        try {
+          emit('sys', 'WISP', `Attempting to instantiate wisp_client.${name}`);
+          const inst = new ctor(WISP_SERVER_URL);
+          emit('sys', 'WISP', `Instantiated wisp_client.${name} successfully.`);
+          return inst;
+        } catch (e) {
+          emit('err', 'WISP', `wisp_client.${name} threw: ${e.message}`);
+        }
+      }
+    }
+
+    emit('err', 'WISP', 'No known wisp_client constructor found. Inspect wisp_client in the console.');
+    return null;
+  }
+
+  async function tryProxyViaWisp(url, method, body, headers) {
+    // Different wisp-client versions expose different request APIs.
+    // Try them in order of likelihood.
+    if (typeof wispClient.request === 'function') {
+      const r = await wispClient.request({
+        hostname: new URL(url).hostname,
+        port: new URL(url).port || 443,
+        path: new URL(url).pathname + new URL(url).search,
+        method, headers: headers || {}, body,
+      });
+      return new Response(r.body, {
+        status: r.statusCode || r.status,
+        statusText: r.statusMessage || r.statusText || '',
+        headers: new Headers(r.headers || {}),
+      });
+    }
+
+    if (typeof wispClient.fetch === 'function') {
+      return await wispClient.fetch(url, { method, body, headers });
+    }
+
+    if (typeof wispClient.createStream === 'function') {
+      throw new Error('wisp_client.createStream is available but raw HTTP-over-stream needs a helper (e.g. epoxy-client).');
+    }
+
+    throw new Error('wisp_client has no request/fetch/createStream method.');
+  }
+
+  function installFetchWrapper() {
+    window.fetch = async function (input, init) {
+      let url = '', method = 'GET', body = null, headers = null;
+      try {
+        url     = typeof input === 'string' ? input : (input && input.url) || '';
+        method  = (init && init.method) || (input && input.method) || 'GET';
+        body    = init && init.body;
+        headers = init && init.headers;
+      } catch {}
+
+      const hot = isRbx(url);
       if (hot) {
-        emit(res.ok ? 'ok' : 'err', 'FETCH', `← ${res.status} ${res.statusText} ${method} ${url}`);
+        emit('sys', 'FETCH', `→ ${method} ${url}`);
+        if (body && typeof body === 'string') emit('req', 'FETCH', `  req: ${short(body, 400)}`);
+      }
+
+      // If not a Roblox request, or wisp not ready, use the direct fetch.
+      if (!hot || !wispReady) {
+        try {
+          const res = await originalFetch(input, init);
+          if (hot) {
+            emit(res.ok ? 'ok' : 'err', 'FETCH', `← ${res.status} (direct) ${method} ${url}`);
+            if (!res.ok) console.warn('[NET FAIL]', method, url, '→', res.status);
+          }
+          return res;
+        } catch (e) {
+          if (hot && isTolerant(url)) {
+            emit('warn', 'FETCH', `  ↳ CORS-tolerant mock for ${url}`);
+            return new Response(mockBodyFor(url), { status: 200, headers: { 'Content-Type': 'application/json' } });
+          }
+          if (hot) emit('err', 'FETCH', `✖ ${method} ${url} THREW: ${e.message}`);
+          throw e;
+        }
+      }
+
+      // Wisp path
+      try {
+        const res = await tryProxyViaWisp(url, method, body, headers);
+        emit(res.ok ? 'ok' : 'err', 'FETCH', `← ${res.status} ${res.statusText} (wisp) ${method} ${url}`);
         emit('req', 'FETCH', `  res: ${await preview(res)}`);
-        if (!res.ok) console.warn('[NET FAIL]', method, url, '→', res.status, res.statusText);
+        return res;
+      } catch (e) {
+        emit('err', 'FETCH', `✖ Wisp failed for ${url}: ${e.message}`);
+        if (isTolerant(url)) {
+          emit('warn', 'FETCH', `  ↳ CORS-tolerant mock for ${url}`);
+          return new Response(mockBodyFor(url), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        // Fall back to direct so the error is real, not synthetic
+        return originalFetch(input, init);
       }
-      return res;
-    } catch (e) {
-      if (hot) {
-        emit('err', 'FETCH', `✖ ${method} ${url} THREW: ${e.message}`);
-      }
+    };
+  }
 
-      // Graceful degradation for known-benign CORS failures.
-      if (hot && isTolerant(url)) {
-        emit('warn', 'FETCH', `  ↳ CORS-tolerant: returning mock 200 for ${url}`);
-        return new Response(mockBodyFor(url), {
-          status: 200,
-          statusText: 'OK (mocked)',
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+  function initWisp() {
+    emit('sys', 'BOOT', `Attempting Wisp connection to ${WISP_SERVER_URL}`);
+    wispClient = tryCreateWispClient();
 
-      if (hot) console.error('[NET THROW]', method, url, e);
-      throw e;
+    if (!wispClient) {
+      emit('err', 'WISP', 'Wisp unavailable. CORS failures will be mocked for known-tolerant endpoints.');
+      installFetchWrapper();
+      return;
     }
-  };
 
-  // ---- XMLHttpRequest -----------------------------------------------------
+    // Wire up lifecycle events if the client supports them
+    if (typeof wispClient.addEventListener === 'function') {
+      wispClient.addEventListener('open', () => {
+        emit('ok', 'WISP', 'Connected. Wisp fetch wrapper active.');
+        wispReady = true;
+      });
+      wispClient.addEventListener('close', () => {
+        emit('warn', 'WISP', 'Connection closed.');
+        wispReady = false;
+      });
+      wispClient.addEventListener('error', (e) => {
+        emit('err', 'WISP', `Error: ${e.message || e}`);
+      });
+    } else {
+      // Fallback: assume it's ready immediately or has onopen-style props
+      if ('onopen' in wispClient) {
+        wispClient.onopen = () => { emit('ok', 'WISP', 'Connected.'); wispReady = true; };
+        wispClient.onerror = (e) => emit('err', 'WISP', `Error: ${e.message || e}`);
+      } else if (typeof wispClient.connect === 'function') {
+        try {
+          const p = wispClient.connect();
+          if (p && typeof p.then === 'function') {
+            p.then(() => { emit('ok', 'WISP', 'Connected.'); wispReady = true; })
+             .catch((e) => emit('err', 'WISP', `Connect failed: ${e.message}`));
+          } else {
+            wispReady = true;
+            emit('ok', 'WISP', 'Connected (sync).');
+          }
+        } catch (e) {
+          emit('err', 'WISP', `Connect threw: ${e.message}`);
+        }
+      } else {
+        // If the client has neither events nor connect(), assume ready.
+        wispReady = true;
+        emit('warn', 'WISP', 'No lifecycle API detected; assuming connected.');
+      }
+    }
+
+    installFetchWrapper();
+  }
+
+  // ============ XMLHttpRequest ============
   const _open = XMLHttpRequest.prototype.open;
   const _send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.open = function (m, u) {
@@ -244,7 +360,7 @@
     return _send.apply(this, arguments);
   };
 
-  // ---- WebSocket ----------------------------------------------------------
+  // ============ WebSocket ============
   const _WS = window.WebSocket;
   function WrappedWS(url, protocols) {
     if (isRbx(url)) emit('sys', 'WS', `→ ${url}`);
@@ -260,7 +376,7 @@
   Object.setPrototypeOf(WrappedWS, _WS);
   window.WebSocket = WrappedWS;
 
-  // ---- Error handlers -----------------------------------------------------
+  // ============ Error handlers ============
   window.addEventListener('error', (ev) => {
     emit('err', 'JS-ERR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
   });
@@ -269,15 +385,15 @@
     emit('err', 'JS-REJ', String(r && (r.stack || r.message || r)));
   });
 
+  // ============ Boot ============
   emit('sys', 'BOOT', 'Network tracer installed.');
-  emit('sys', 'BOOT', 'CORS-tolerant: universes/locales/assets/details/telemetry/thumbnails only.');
-  emit('sys', 'BOOT', 'Authentication + gamejoin calls are NOT mocked — real failures will be visible.');
-  emit('sys', 'BOOT', showOverlay ? 'On-screen overlay enabled (?debug=1).' : 'Add ?debug=1 to URL for on-screen log.');
+  emit('sys', 'BOOT', showOverlay ? 'Overlay enabled (?debug=1).' : 'Add ?debug=1 to URL for on-screen log.');
+  initWisp();
 })();
 </script>
 
 <!-- ======================================================================
-     3. HOST CONFIG
+     4. HOST CONFIG
      ====================================================================== -->
 <script>
   window.robloxWasmHostConfig = {
@@ -287,7 +403,7 @@
 </script>
 
 <!-- ======================================================================
-     4. ENGINE LOADER
+     5. ENGINE LOADER
      ====================================================================== -->
 <script src="./WasmLoader.js"></script>
 
