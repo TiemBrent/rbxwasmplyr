@@ -41,7 +41,7 @@ self.onmessage = async (event) => {
 
       const init = { method: method || 'GET' };
 
-      // Plain object, not Headers — Epoxy's Rust side preserves these reliably.
+      // Plain object — Epoxy's Rust side preserves these reliably.
       if (headers && headers.length) {
         const hdrs = {};
         for (const [k, v] of headers) {
@@ -58,7 +58,7 @@ self.onmessage = async (event) => {
         }
       }
 
-      // Debug: confirm what we're actually handing to Epoxy
+      // Debug relay — tells the main thread exactly what we're passing to Epoxy.
       self.postMessage({
         type: 'debug',
         msg: '[WORKER] ' + method + ' ' + url +
