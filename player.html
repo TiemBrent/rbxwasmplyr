@@ -7,24 +7,12 @@
   <script src="./coi-serviceworker.js"></script>
   <style>
     * { box-sizing: border-box; }
-    html, body {
-      margin: 0; padding: 0;
-      background: #111; color: #eee;
-      font-family: system-ui, sans-serif;
-      overflow: hidden; height: 100%;
-    }
-    #canvas {
-      display: block;
-      width: 100vw; height: 100vh;
-      background: #000;
-    }
-    #loading-overlay {
-      position: fixed; inset: 0;
-      background: #111;
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      z-index: 1000; transition: opacity 0.3s ease;
-    }
+    html, body { margin: 0; padding: 0; background: #111; color: #eee;
+      font-family: system-ui, sans-serif; overflow: hidden; height: 100%; }
+    #canvas { display: block; width: 100vw; height: 100vh; background: #000; }
+    #loading-overlay { position: fixed; inset: 0; background: #111;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; z-index: 1000; transition: opacity 0.3s ease; }
     #loading-overlay.hidden { opacity: 0; pointer-events: none; }
     #loading-background-image { position: absolute; inset: 0; object-fit: cover; opacity: 0.25; z-index: -1; }
     #loading-icon-shell { width: 96px; height: 96px; border-radius: 16px; overflow: hidden; margin-bottom: 16px; background: #222; }
@@ -32,36 +20,25 @@
     #loading-verified-badge { display: inline-block; width: 16px; height: 16px; margin-left: 6px; vertical-align: middle; }
     #loading-experience-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
     #loading-experience-creator { font-size: 14px; color: #aaa; margin-bottom: 20px; }
-    #loading-text,
-    #loading-status,
-    #loading-message,
-    #loading-progress,
-    #loading-subtext,
-    #status {
-      font-size: 13px; color: #777;
-      max-width: 400px; text-align: center; margin-top: 8px;
-    }
-    .loading-spinner {
-      width: 32px; height: 32px;
-      border: 3px solid #333; border-top-color: #eee;
-      border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px;
-    }
+    #loading-text, #loading-status, #loading-message,
+    #loading-progress, #loading-subtext, #status {
+      font-size: 13px; color: #777; max-width: 400px;
+      text-align: center; margin-top: 8px; }
+    .loading-spinner { width: 32px; height: 32px;
+      border: 3px solid #333; border-top-color: #eee; border-radius: 50%;
+      animation: spin 1s linear infinite; margin-bottom: 16px; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .loading-error-panel { display: none; flex-direction: column; align-items: center; text-align: center; padding: 24px; }
+    .loading-error-panel { display: none; flex-direction: column;
+      align-items: center; text-align: center; padding: 24px; }
     .loading-error-panel.visible { display: flex; }
     #loading-error-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; color: #ff6b6b; }
     #loading-error-message { font-size: 14px; color: #bbb; max-width: 500px; margin-bottom: 8px; word-break: break-word; }
     #loading-error-code { font-size: 12px; color: #666; margin-bottom: 20px; }
-    .btn { padding: 8px 20px; border: 1px solid #444; border-radius: 6px; background: #222; color: #eee; font-size: 14px; cursor: pointer; margin: 0 4px; }
+    .btn { padding: 8px 20px; border: 1px solid #444; border-radius: 6px;
+      background: #222; color: #eee; font-size: 14px; cursor: pointer; margin: 0 4px; }
     .btn:hover { background: #333; }
-    #server,
-    #proxyenabled {
-      position: absolute;
-      width: 1px; height: 1px;
-      overflow: hidden;
-      clip: rect(0 0 0 0);
-      white-space: nowrap;
-    }
+    #server, #proxyenabled { position: absolute; width: 1px; height: 1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     #loading-cancel { margin-top: 16px; }
   </style>
 </head>
@@ -80,12 +57,8 @@
     <div id="loading-progress"></div>
     <div id="loading-subtext"></div>
     <div id="status"></div>
-
-    <!-- Required by WasmPlayer.js Ae(): document.getElementById("server").innerText = t -->
     <div id="server"></div>
-    <!-- Required by WasmPlayer.js Ae(): document.getElementById("proxyenabled") -->
     <span id="proxyenabled"></span>
-
     <div class="loading-error-panel">
       <div id="loading-error-title">Error</div>
       <div id="loading-error-message"></div>
@@ -95,30 +68,12 @@
     </div>
   </div>
 
-  <!-- 1. Host config — runs FIRST, before WasmLoader.js.
-       placeId must be here, not just in the URL, so WasmLoader populates
-       the `c` arg that WasmPlayer.js passes to set_place_id(). -->
+  <!-- 1. Host config -->
   <script>
-  (function () {
-    const params = new URLSearchParams(location.search);
-    const rawPlace = params.get('placeId');
-    const placeId = rawPlace ? Number(rawPlace) : undefined;
-
-    window.robloxWasmHostConfig = {
-      server: 'prod',
-      placeId: placeId,
-      // belt-and-suspenders: if WasmLoader uses a different key name,
-      // these cover the common variants.
-      placeID: placeId,
-      startPlaceId: placeId,
-      universeId: params.get('universeId') ? Number(params.get('universeId')) : undefined,
-    };
-
-    console.log('[HOSTCONFIG]', window.robloxWasmHostConfig);
-  })();
+    window.robloxWasmHostConfig = { server: 'prod' };
   </script>
 
-  <!-- 2. Fetch wrapper + Wisp worker (unchanged, working) -->
+  <!-- 2. Fetch wrapper + Wisp worker -->
   <script>
   (function () {
     'use strict';
@@ -129,7 +84,11 @@
 
     const TOLERANT_PATTERNS = ['economy.roblox.com/v2/assets/','apis.roblox.com/universes/','locale.roblox.com/'];
     const ROBLOX_DOMAINS = ['roblox.com','rbxcdn.com','robloxlabs.com','rbxcloud.com'];
-    const isRobloxUrl = (url) => { try { const h = new URL(url).hostname; return ROBLOX_DOMAINS.some(d => h === d || h.endsWith('.' + d)); } catch { return false; } };
+    const isRobloxUrl = (url) => {
+      try { const h = new URL(url).hostname;
+        return ROBLOX_DOMAINS.some(d => h === d || h.endsWith('.' + d));
+      } catch { return false; }
+    };
 
     function mockResponse(url) {
       let body = { mocked: true, url };
@@ -153,7 +112,8 @@
         const p = pending.get(msg.id); if (!p) return; pending.delete(msg.id);
         if (msg.error) { p.reject(new Error(msg.error)); return; }
         const res = new Response(msg.body, { status: msg.status, statusText: msg.statusText || '', headers: msg.headers });
-        Object.defineProperty(res, 'url', { value: p.url }); p.resolve(res);
+        Object.defineProperty(res, 'url', { value: p.url });
+        p.resolve(res);
       }
     };
     worker.onerror = (e) => { log('[WISP] Worker onerror:', (e && e.message) || e); };
@@ -168,24 +128,111 @@
 
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async function (input, init = {}) {
-      let req; try { req = input instanceof Request ? input : new Request(input, init); } catch { return nativeFetch(input, init); }
+      let req;
+      try { req = input instanceof Request ? input : new Request(input, init); }
+      catch { return nativeFetch(input, init); }
       const url = req.url;
-      for (const pat of TOLERANT_PATTERNS) { if (url.includes(pat)) { dbg('[FETCH] (mock) ' + req.method + ' ' + url); return mockResponse(url); } }
-      if (isRobloxUrl(url)) {
-        await workerReadyPromise; const body = req.body ? await req.arrayBuffer() : null;
-        dbg('[FETCH] → ' + req.method + ' ' + url);
-        try { const res = await proxyFetch(url, req.method, [...req.headers], body); dbg('[FETCH] ← ' + res.status + ' (wisp) ' + req.method + ' ' + url); return res; }
-        catch (e) { log('[FETCH] proxy failed for ' + url + ': ' + ((e && e.message) || e)); throw e; }
+
+      for (const pat of TOLERANT_PATTERNS) {
+        if (url.includes(pat)) { dbg('[FETCH] (mock) ' + req.method + ' ' + url); return mockResponse(url); }
       }
+
+      if (isRobloxUrl(url)) {
+        await workerReadyPromise;
+        const body = req.body ? await req.arrayBuffer() : null;
+        dbg('[FETCH] → ' + req.method + ' ' + url);
+        try {
+          const res = await proxyFetch(url, req.method, [...req.headers], body);
+          dbg('[FETCH] ← ' + res.status + ' (wisp) ' + req.method + ' ' + url);
+          return res;
+        } catch (e) {
+          log('[FETCH] proxy failed for ' + url + ': ' + ((e && e.message) || e));
+          throw e;
+        }
+      }
+
       return nativeFetch(req);
     };
 
     worker.postMessage({ type: 'init', wispUrl });
-    window.__rbxwasm = { worker, proxyFetch, isRobloxUrl, TOLERANT_PATTERNS };
+    window.__rbxwasm = { worker, proxyFetch, isRobloxUrl, TOLERANT_PATTERNS, workerReadyPromise };
   })();
   </script>
 
-  <!-- 3. Load the official loader. It resolves the engine and injects WasmPlayer.js. -->
+  <!-- 3. Script-append interceptor: patch WasmPlayer.js on the fly -->
+  <script>
+  (function () {
+    'use strict';
+    const log = (...a) => console.log(...a);
+
+    // Regex matches `X&&Y.set_place_id(X)` for any minified identifier names.
+    const GUARD_RE = /([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.set_place_id\(\1\)/;
+
+    function patchWasmPlayer(src) {
+      const m = src.match(GUARD_RE);
+      if (!m) {
+        console.warn('[PATCH] set_place_id guard pattern not found in WasmPlayer.js — leaving unchanged');
+        return src;
+      }
+      const guard = m[1];
+      const mod = m[2];
+      log('[PATCH] Found guard: ' + guard + '&&' + mod + '.set_place_id(' + guard + ')');
+      const replacement =
+        '(function(){' +
+          'var p=new URLSearchParams(location.search).get("placeId");' +
+          'if(p){' + mod + '.set_place_id(Number(p))}' +
+          'else if(' + guard + '){' + mod + '.set_place_id(' + guard + ')}' +
+        '})()';
+      return src.replace(GUARD_RE, replacement);
+    }
+
+    const origAppend = Node.prototype.appendChild;
+
+    Node.prototype.appendChild = function (node) {
+      if (!(node instanceof HTMLScriptElement) ||
+          typeof node.src !== 'string' ||
+          !/\/WasmPlayer\.js(\?|$)/.test(node.src)) {
+        return origAppend.call(this, node);
+      }
+
+      const cdnUrl = node.src;
+      const parent = this;
+      log('[PATCH] Intercepted WasmPlayer.js append: ' + cdnUrl);
+
+      (async () => {
+        try {
+          // Fetch through the Wisp proxy so it stays consistent with everything else.
+          const res = await window.__rbxwasm.proxyFetch(cdnUrl, 'GET', [], null);
+          const src = await res.text();
+          log('[PATCH] Fetched ' + src.length + ' bytes of WasmPlayer.js');
+
+          const patched = patchWasmPlayer(src);
+          const blob = new Blob([patched], { type: 'application/javascript' });
+          const blobUrl = URL.createObjectURL(blob);
+
+          const s = document.createElement('script');
+          s.src = blobUrl;
+          // drop crossOrigin — blob is same-origin
+          origAppend.call(parent, s);
+          log('[PATCH] Injected patched WasmPlayer.js from blob');
+          // release the blob URL once loaded
+          s.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
+        } catch (e) {
+          console.error('[PATCH] Failed to patch, falling back to CDN:', e);
+          const s = document.createElement('script');
+          s.src = cdnUrl;
+          s.crossOrigin = 'anonymous';
+          origAppend.call(parent, s);
+        }
+      })();
+
+      // Return the placeholder node so callers that expect a node still get one.
+      return node;
+    };
+  })();
+  </script>
+
+  <!-- 4. Official loader (will trigger our interceptor) -->
   <script src="./WasmLoader.js"></script>
 </body>
 </html>
