@@ -39,7 +39,7 @@
       pointer-events: none;
     }
 
-    /* Background image layer (optional, WasmPlayer will set src) */
+    /* Background image layer */
     #loading-background-image {
       position: absolute;
       inset: 0;
@@ -61,7 +61,6 @@
       object-fit: cover;
     }
     #loading-verified-badge {
-      /* WasmPlayer toggles visibility; keep it present */
       display: inline-block;
       width: 16px; height: 16px;
       margin-left: 6px;
@@ -80,13 +79,16 @@
       margin-bottom: 20px;
     }
 
-    /* Status line */
+    /* Status / progress lines – include every plausible ID */
+    #loading-text,
+    #loading-status,
+    #loading-message,
     #status {
       font-size: 13px;
       color: #777;
       max-width: 400px;
       text-align: center;
-      margin-top: 12px;
+      margin-top: 8px;
     }
 
     /* Spinner */
@@ -135,9 +137,8 @@
     }
     .btn:hover { background: #333; }
 
-    /* Hidden helper for proxyenabled (WasmPlayer sets its text) */
+    /* Hidden helper for proxy status */
     #proxyenabled {
-      /* Keep it in the DOM but visually hidden */
       position: absolute;
       width: 1px; height: 1px;
       overflow: hidden;
@@ -145,7 +146,7 @@
       white-space: nowrap;
     }
 
-    /* Cancel button (WasmPlayer may toggle it) */
+    /* Cancel button */
     #loading-cancel {
       margin-top: 16px;
     }
@@ -155,7 +156,7 @@
   <!-- Canvas -->
   <canvas id="canvas" width="1280" height="720"></canvas>
 
-  <!-- Loading overlay with every ID WasmPlayer.js queries -->
+  <!-- Loading overlay with every ID WasmPlayer.js may query -->
   <div id="loading-overlay">
     <img id="loading-background-image" alt="" />
 
@@ -169,12 +170,16 @@
 
     <div class="loading-spinner"></div>
 
+    <!-- Status lines – include all variants -->
+    <div id="loading-text"></div>
+    <div id="loading-status"></div>
+    <div id="loading-message"></div>
     <div id="status"></div>
 
     <!-- Hidden proxy status element -->
     <span id="proxyenabled"></span>
 
-    <!-- Error panel (WasmPlayer toggles .visible) -->
+    <!-- Error panel -->
     <div class="loading-error-panel">
       <div id="loading-error-title">Error</div>
       <div id="loading-error-message"></div>
@@ -191,7 +196,7 @@
     };
   </script>
 
-  <!-- 2. Fetch wrapper + Wisp worker (unchanged from working version) -->
+  <!-- 2. Fetch wrapper + Wisp worker -->
   <script>
   (function () {
     'use strict';
