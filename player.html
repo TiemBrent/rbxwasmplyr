@@ -68,12 +68,10 @@
     </div>
   </div>
 
-  <!-- 1. Host config -->
   <script>
     window.robloxWasmHostConfig = { server: 'prod' };
   </script>
 
-  <!-- 2. Fetch wrapper + Wisp worker -->
   <script>
   (function () {
     'use strict';
@@ -159,35 +157,51 @@
   })();
   </script>
 
-  <!-- 3. Script-append interceptor: patch WasmPlayer.js on the fly -->
   <script>
   (function () {
     'use strict';
     const log = (...a) => console.log(...a);
 
-    // Regex matches `X&&Y.set_place_id(X)` for any minified identifier names.
     const GUARD_RE = /([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.set_place_id\(\1\)/;
 
     function patchWasmPlayer(src) {
       const m = src.match(GUARD_RE);
       if (!m) {
-        console.warn('[PATCH] set_place_id guard pattern not found in WasmPlayer.js — leaving unchanged');
+        console.warn('[PATCH] set_place_id guard pattern not found — leaving unchanged');
         return src;
       }
       const guard = m[1];
       const mod = m[2];
       log('[PATCH] Found guard: ' + guard + '&&' + mod + '.set_place_id(' + guard + ')');
+
+      // Verbose replacement — logs unconditionally so we can see exactly
+      // what happens at runtime even though set_place_id itself is silent
+      // in the [WASM-JSPI] trace (numeric args don't trigger allocator warnings).
       const replacement =
         '(function(){' +
-          'var p=new URLSearchParams(location.search).get("placeId");' +
-          'if(p){' + mod + '.set_place_id(Number(p))}' +
-          'else if(' + guard + '){' + mod + '.set_place_id(' + guard + ')}' +
+          'try{' +
+            'var p=new URLSearchParams(location.search).get("placeId");' +
+            'console.log("[PLACE-PATCH] IIFE ran, location.search=" + JSON.stringify(location.search) + " p=" + JSON.stringify(p) + " guard.typeof=" + (typeof ' + guard + ') + " guard.value=" + JSON.stringify(' + guard + '));' +
+            'if(p){' +
+              'var pid=Number(p);' +
+              'console.log("[PLACE-PATCH] calling set_place_id(" + pid + ")");' +
+              mod + '.set_place_id(pid);' +
+              'console.log("[PLACE-PATCH] set_place_id returned successfully");' +
+            '}else if(' + guard + '){' +
+              'console.log("[PLACE-PATCH] calling set_place_id(" + ' + guard + ' + ") from guard");' +
+              mod + '.set_place_id(' + guard + ');' +
+              'console.log("[PLACE-PATCH] set_place_id returned successfully");' +
+            '}else{' +
+              'console.warn("[PLACE-PATCH] neither p nor guard truthy — skipping");' +
+            '}' +
+          '}catch(e){' +
+            'console.error("[PLACE-PATCH] threw:", e && (e.stack || e.message || e));' +
+          '}' +
         '})()';
       return src.replace(GUARD_RE, replacement);
     }
 
     const origAppend = Node.prototype.appendChild;
-
     Node.prototype.appendChild = function (node) {
       if (!(node instanceof HTMLScriptElement) ||
           typeof node.src !== 'string' ||
@@ -201,21 +215,20 @@
 
       (async () => {
         try {
-          // Fetch through the Wisp proxy so it stays consistent with everything else.
           const res = await window.__rbxwasm.proxyFetch(cdnUrl, 'GET', [], null);
           const src = await res.text();
           log('[PATCH] Fetched ' + src.length + ' bytes of WasmPlayer.js');
 
           const patched = patchWasmPlayer(src);
+          log('[PATCH] Post-patch size: ' + patched.length + ' bytes (delta ' + (patched.length - src.length) + ')');
+
           const blob = new Blob([patched], { type: 'application/javascript' });
           const blobUrl = URL.createObjectURL(blob);
 
           const s = document.createElement('script');
           s.src = blobUrl;
-          // drop crossOrigin — blob is same-origin
           origAppend.call(parent, s);
-          log('[PATCH] Injected patched WasmPlayer.js from blob');
-          // release the blob URL once loaded
+          log('[PATCH] Injected patched WasmPlayer.js from blob: ' + blobUrl);
           s.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
         } catch (e) {
           console.error('[PATCH] Failed to patch, falling back to CDN:', e);
@@ -226,13 +239,11 @@
         }
       })();
 
-      // Return the placeholder node so callers that expect a node still get one.
       return node;
     };
   })();
   </script>
 
-  <!-- 4. Official loader (will trigger our interceptor) -->
   <script src="./WasmLoader.js"></script>
 </body>
 </html>
