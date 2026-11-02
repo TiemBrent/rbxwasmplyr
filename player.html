@@ -73,7 +73,7 @@
     window.robloxWasmHostConfig = { server: 'prod' };
   </script>
 
-  <!-- 2. Fetch wrapper + Wisp worker -->
+  <!-- 2. Fetch wrapper + Wisp worker (with cookie + CSRF) -->
   <script>
   (function () {
     'use strict';
@@ -98,6 +98,15 @@
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
 
+    // --- Auth state ---
+    const ROBLOX_COOKIE = (localStorage.getItem('ROBLOSECURITY') || '').trim();
+    if (ROBLOX_COOKIE) {
+      log('[AUTH] .ROBLOSECURITY loaded from localStorage (length=' + ROBLOX_COOKIE.length + ')');
+    } else {
+      log('[AUTH] No .ROBLOSECURITY in localStorage. gamejoin will fail with status 12.');
+    }
+    let csrfToken = null;
+
     const wispUrl = 'wss://epoxy-wisp-server.onrender.com';
     const worker = new Worker('./epoxy-worker.js', { type: 'module' });
     let readyResolve;
@@ -108,10 +117,7 @@
       const msg = event.data; if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'ready') { log('[WISP] Connected. Wisp fetch wrapper active.'); readyResolve(); return; }
       if (msg.type === 'error') { log('[WISP] Worker error:', msg.error); return; }
-      if (msg.type === 'debug') {
-        log(msg.msg);
-        return;
-      }
+      if (msg.type === 'debug') { log(msg.msg); return; }
       if (msg.type === 'fetch-response') {
         const p = pending.get(msg.id); if (!p) return; pending.delete(msg.id);
         if (msg.error) { p.reject(new Error(msg.error)); return; }
@@ -122,11 +128,7 @@
     };
     worker.onerror = (e) => { log('[WISP] Worker onerror:', (e && e.message) || e); };
 
-    // KEY FIX: proxyFetch now auto-detects whether the body is text-based
-    // from the Content-Type header. When it is, the worker decodes the
-    // buffer back to a string before handing it to Epoxy — otherwise
-    // Epoxy treats the body as raw bytes and strips/overwrites the
-    // Content-Type header, which was causing the 415 on gamejoin.
+    // --- proxyFetch: text-detection for body; used by everything below ---
     function proxyFetch(url, method, headers, body, bodyIsText) {
       if (bodyIsText === undefined && body) {
         const hdrs = headers || [];
@@ -144,14 +146,9 @@
       }
       bodyIsText = !!bodyIsText;
 
-      if (body && DEBUG) {
-        log('[PROXY] ' + method + ' ' + url + ' bodyIsText=' + bodyIsText);
-      }
-
       return new Promise((resolve, reject) => {
         const id = nextId++;
         pending.set(id, { resolve, reject, url });
-        // Text bodies are copied (small); binary bodies are transferred.
         const transfer = body && !bodyIsText ? [body] : [];
         worker.postMessage(
           { type: 'fetch', id, url, method, headers, body, bodyIsText },
@@ -160,6 +157,68 @@
       });
     }
 
+    // --- proxyFetchAuthed: cookie + CSRF injection with retry ---
+    async function proxyFetchAuthed(url, method, headers, body, bodyIsText) {
+      const hdrs = (headers || []).map(([k, v]) => [k, v]);
+
+      // Inject session cookie on every Roblox request (except CDN — cookie not needed).
+      if (ROBLOX_COOKIE && !/\.(rbxcdn|rbxcloud)\.com/.test(url)) {
+        // Remove any caller-supplied Cookie so we don't duplicate.
+        for (let i = hdrs.length - 1; i >= 0; i--) {
+          if (String(hdrs[i][0]).toLowerCase() === 'cookie') hdrs.splice(i, 1);
+        }
+        hdrs.push(['Cookie', '.ROBLOSECURITY=' + ROBLOX_COOKIE]);
+      }
+
+      // Attach CSRF token to non-idempotent requests.
+      if (csrfToken && method !== 'GET' && method !== 'HEAD') {
+        hdrs.push(['X-CSRF-Token', csrfToken]);
+      }
+
+      let res = await proxyFetch(url, method, hdrs, body, bodyIsText);
+
+      // Retry once on CSRF challenge.
+      if (res.status === 403 && method !== 'GET' && method !== 'HEAD') {
+        const newToken = res.headers.get('x-csrf-token');
+        if (newToken) {
+          log('[AUTH] CSRF challenge received; retrying with token (len=' + newToken.length + ')');
+          csrfToken = newToken;
+          const retry = hdrs.filter(([k]) => String(k).toLowerCase() !== 'x-csrf-token');
+          retry.push(['X-CSRF-Token', csrfToken]);
+          res = await proxyFetch(url, method, retry, body, bodyIsText);
+        }
+      }
+
+      return res;
+    }
+
+    // --- Prefetch CSRF token on startup (uses auth.roblox.com/v2/logout as the trigger) ---
+    async function prefetchCsrfToken() {
+      if (!ROBLOX_COOKIE) return;
+      try {
+        const res = await proxyFetch(
+          'https://auth.roblox.com/v2/logout',
+          'POST',
+          [
+            ['Cookie', '.ROBLOSECURITY=' + ROBLOX_COOKIE],
+            ['Content-Type', 'application/json']
+          ],
+          new TextEncoder().encode('{}').buffer,
+          true
+        );
+        const t = res.headers.get('x-csrf-token');
+        if (t) {
+          csrfToken = t;
+          log('[AUTH] Prefetched CSRF token (len=' + t.length + ')');
+        } else {
+          log('[AUTH] CSRF prefetch returned status ' + res.status + ' but no token');
+        }
+      } catch (e) {
+        log('[AUTH] CSRF prefetch failed: ' + ((e && e.message) || e));
+      }
+    }
+
+    // --- Global fetch wrapper ---
     const nativeFetch = window.fetch.bind(window);
     window.fetch = async function (input, init = {}) {
       let req;
@@ -176,7 +235,7 @@
         const body = req.body ? await req.arrayBuffer() : null;
         dbg('[FETCH] → ' + req.method + ' ' + url);
         try {
-          const res = await proxyFetch(url, req.method, [...req.headers], body);
+          const res = await proxyFetchAuthed(url, req.method, [...req.headers], body);
           dbg('[FETCH] ← ' + res.status + ' (wisp) ' + req.method + ' ' + url);
           return res;
         } catch (e) {
@@ -189,7 +248,16 @@
     };
 
     worker.postMessage({ type: 'init', wispUrl });
-    window.__rbxwasm = { worker, proxyFetch, isRobloxUrl, TOLERANT_PATTERNS, workerReadyPromise };
+
+    // Fire the CSRF prefetch once the worker is up.
+    workerReadyPromise.then(() => prefetchCsrfToken());
+
+    window.__rbxwasm = {
+      worker, proxyFetch, proxyFetchAuthed,
+      isRobloxUrl, TOLERANT_PATTERNS, workerReadyPromise,
+      setCookie: (v) => { localStorage.setItem('ROBLOSECURITY', v); log('[AUTH] Cookie set. Reload the page.'); },
+      getCsrf: () => csrfToken
+    };
   })();
   </script>
 
@@ -242,11 +310,10 @@
   })();
   </script>
 
-  <!-- 4. Stack-trace hook: capture WASM call stacks when launch/join decisions log -->
+  <!-- 4. Stack-trace hook: capture WASM call stacks on launch/join decisions -->
   <script>
   (function () {
     'use strict';
-    const log = (...a) => console.log.apply(console, a);
     const origLog = console.log.bind(console);
 
     const TRIGGERS = [
@@ -267,7 +334,6 @@
       origLog.call(console, new Error('STACK').stack);
     }
 
-    // Hook 1: console.log
     console.log = function (...args) {
       const msg = args.map(a => typeof a === 'string' ? a : String(a)).join(' ');
       const hit = TRIGGERS.find(t => msg.includes(t));
@@ -275,7 +341,6 @@
       return origLog.apply(console, args);
     };
 
-    // Hook 2: Module.print — engine may bypass console.log
     const poll = setInterval(() => {
       const M = window.Module;
       if (!M) return;
