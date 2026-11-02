@@ -108,6 +108,10 @@
       const msg = event.data; if (!msg || typeof msg !== 'object') return;
       if (msg.type === 'ready') { log('[WISP] Connected. Wisp fetch wrapper active.'); readyResolve(); return; }
       if (msg.type === 'error') { log('[WISP] Worker error:', msg.error); return; }
+      if (msg.type === 'debug') {
+        log(msg.msg);
+        return;
+      }
       if (msg.type === 'fetch-response') {
         const p = pending.get(msg.id); if (!p) return; pending.delete(msg.id);
         if (msg.error) { p.reject(new Error(msg.error)); return; }
