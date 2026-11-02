@@ -141,6 +141,13 @@
     window.__rbxwasm = { worker, proxyFetch, isRobloxUrl, TOLERANT_PATTERNS };
   })();
   </script>
-  <script src="./WasmLoader.js"></script>
+  <!-- FIX: Load the engine script only after the DOM is fully parsed -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const script = document.createElement('script');
+      script.src = './WasmLoader.js';
+      document.head.appendChild(script);
+    });
+  </script>
 </body>
 </html>
