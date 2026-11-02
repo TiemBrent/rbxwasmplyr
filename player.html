@@ -1,411 +1,245 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-<title>Roblox Web Client</title>
-<style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    width: 100%; height: 100%; overflow: hidden;
-    background: #000; color: #fff;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  }
-  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; background: #000; }
-  #canvas.fullscreencanvas, #canvas.mobilecanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
-  #canvas.tab-lock-contended { visibility: hidden; }
-
-  #loading-overlay {
-    position: fixed; inset: 0; z-index: 100;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    background: #111; overflow: hidden; transition: opacity 0.6s ease;
-  }
-  #loading-overlay.loading-exiting { opacity: 0; pointer-events: none; }
-  #loading-overlay[hidden] { display: none !important; }
-  #loading-overlay.tab-lock-contended { background: #1a1a1a; }
-  #loading-overlay.loading-failed #status { display: none; }
-
-  #loading-background-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0.15; filter: blur(8px); z-index: 0; }
-  #loading-icon-shell { position: relative; z-index: 1; width: 120px; height: 120px; border-radius: 12px; overflow: hidden; background: #222; margin-bottom: 16px; display: flex; align-items: center; justify-content: center; }
-  #loading-experience-icon { width: 100%; height: 100%; object-fit: cover; }
-  #loading-experience-title { position: relative; z-index: 1; font-size: 20px; font-weight: 600; margin-bottom: 4px; text-align: center; max-width: 80%; }
-  #loading-experience-creator { position: relative; z-index: 1; font-size: 14px; color: #aaa; margin-bottom: 24px; }
-  #loading-experience-creator[hidden] { display: none; }
-  #loading-verified-badge { position: relative; z-index: 1; margin-left: 4px; }
-  #loading-verified-badge[hidden] { display: none; }
-  #status { position: relative; z-index: 1; font-size: 13px; color: #aaa; text-align: center; max-width: 80%; min-height: 1.2em; }
-
-  .loading-error-panel { position: relative; z-index: 2; text-align: center; max-width: 480px; padding: 24px; }
-  .loading-error-panel[hidden] { display: none; }
-  #loading-error-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-  #loading-error-message { font-size: 14px; color: #ddd; margin-bottom: 8px; }
-  #loading-error-code { font-size: 12px; color: #888; font-family: monospace; margin-bottom: 16px; }
-  #loading-error-leave, #loading-cancel { padding: 8px 24px; border: none; border-radius: 6px; background: #00a2ff; color: #fff; font-weight: 600; cursor: pointer; font-size: 14px; }
-  #loading-error-leave:hover, #loading-cancel:hover { background: #0090e0; }
-  #loading-cancel { position: absolute; bottom: 20px; right: 20px; z-index: 2; background: transparent; color: #888; border: 1px solid #444; }
-  #loading-cancel:hover { background: #222; }
-
-  #server, #proxyenabled { display: none; }
-
-  #input-container { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 50; display: none; }
-  #input-textarea { width: 320px; height: 40px; padding: 8px 12px; font-size: 14px; border-radius: 6px; border: 1px solid #444; background: rgba(0,0,0,0.85); color: #fff; resize: none; }
-  #input-input { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
-
-  #netlog { position: fixed; bottom: 0; left: 0; right: 0; max-height: 45vh; overflow-y: auto; background: rgba(0,0,0,0.94); color: #0f0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.4; padding: 8px 10px; z-index: 99999; display: none; white-space: pre-wrap; word-break: break-all; border-top: 1px solid #0f0; }
-  #netlog.visible { display: block; }
-  #netlog .err { color: #f55; }
-  #netlog .ok { color: #0a0; }
-  #netlog .req { color: #888; }
-  #netlog .sys { color: #0af; }
-  #netlog .warn { color: #fa0; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roblox WASM Player</title>
+  <script src="./coi-serviceworker.js"></script>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: #eee;
+      font-family: system-ui, sans-serif;
+      overflow: hidden;
+    }
+    #game-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+    }
+  </style>
 </head>
 <body>
+  <canvas id="game-canvas" width="1280" height="720"></canvas>
 
-<canvas id="canvas"></canvas>
-<div id="loading-overlay" aria-label="Loading Roblox" aria-busy="true">
-  <img id="loading-background-image" alt="" />
-  <div id="loading-icon-shell"><img id="loading-experience-icon" alt="" /></div>
-  <div id="loading-experience-title">Roblox</div>
-  <div id="loading-experience-creator" hidden></div>
-  <span id="loading-verified-badge" hidden></span>
-  <div id="status">Initialising…</div>
-  <div class="loading-error-panel" hidden>
-    <div id="loading-error-title">Error</div>
-    <div id="loading-error-message"></div>
-    <div id="loading-error-code"></div>
-    <button id="loading-error-leave">Leave</button>
-  </div>
-  <button id="loading-cancel">Cancel</button>
-</div>
-<div id="input-container">
-  <textarea id="input-textarea" placeholder="Chat…"></textarea>
-  <input id="input-input" type="text" />
-</div>
-<div id="server"></div>
-<div id="proxyenabled"></div>
-<div id="netlog"></div>
+  <!-- 1. Install fetch wrapper + create Wisp worker BEFORE the engine loads. -->
+  <script>
+  (function () {
+    'use strict';
 
-<!-- ======================================================================
-     1. CROSS-ORIGIN ISOLATION
-     ====================================================================== -->
-<script src="./coi-serviceworker.js"></script>
+    const params = new URLSearchParams(location.search);
+    const DEBUG = params.has('debug');
+    const log = (...a) => console.log(...a);
+    const dbg = (...a) => { if (DEBUG) console.log(...a); };
 
-<!-- ======================================================================
-     2. WISP CLIENT
-     Must be in the same folder. If the file is an ES module (has
-     "export" statements), change to <script type="module"> and adjust
-     the loader below. This block tries both classic script and module.
-     ====================================================================== -->
-<script src="./wisp-client.js"></script>
-
-<!-- ======================================================================
-     3. NETWORK TRACER + WISP PROXY + CORS TOLERANCE
-     Runs before WasmLoader.js / WasmPlayer.js / WebClient.js.
-     ====================================================================== -->
-<script>
-(function () {
-  // ============ CONFIGURATION ============
-  const WISP_SERVER_URL = 'wss://epoxy-wisp-server.onrender.com/';
-
-  // ============ LOGGING ============
-  const params = new URLSearchParams(location.search);
-  const showOverlay = params.get('debug') === '1';
-  const logEl = document.getElementById('netlog');
-  const t0 = performance.now();
-  if (showOverlay && logEl) logEl.classList.add('visible');
-
-  const RBX_HOST = /(?:^|\.)(?:roblox\.com|rbxcdn\.com|robloxlabs\.com)$/i;
-  const isRbx = (u) => { try { return RBX_HOST.test(new URL(u, location.href).hostname); } catch { return false; } };
-  const relms = () => String(Math.round(performance.now() - t0)).padStart(6, ' ');
-  const short = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n) + '…' : s; };
-
-  function emit(cls, prefix, msg) {
-    const text = `[${relms()}ms] ${prefix} ${msg}`;
-    const style =
-      cls === 'err'  ? 'color:#f55' :
-      cls === 'ok'   ? 'color:#0a0' :
-      cls === 'sys'  ? 'color:#0af' :
-      cls === 'warn' ? 'color:#fa0' : 'color:#888';
-    console.log('%c' + text, style);
-    if (showOverlay && logEl) {
-      const d = document.createElement('div');
-      d.className = cls;
-      d.textContent = text;
-      logEl.appendChild(d);
-      logEl.scrollTop = logEl.scrollHeight;
-    }
-  }
-
-  async function preview(res) {
-    if (res.type === 'opaque' || res.type === 'opaqueredirect') return '[opaque]';
-    const ct = res.headers.get('content-type') || '';
-    if (!/json|text|xml|javascript|html|plain/i.test(ct)) {
-      const len = res.headers.get('content-length');
-      return `[binary ct=${ct || '?'}${len ? ' ' + len + 'B' : ''}]`;
-    }
-    try { return short(await res.clone().text(), 700); } catch (e) { return `[read err: ${e.message}]`; }
-  }
-
-  // ============ CORS-TOLERANT ENDPOINTS ============
-  const TOLERANT_PATTERNS = [
-    /\/universes\/v1\/places\/[^/]+\/universe/,
-    /\/v1\/locales\/user-localization-locus-supported-locales/,
-    /\/v2\/assets\/[^/]+\/details/,
-    /experience-signals-ingest/,
-    /ephemeralcounters\.api\.roblox\.com/,
-    /ecsv2\.roblox\.com\/(?:timespent|client)\/pbe/,
-    /sentry-relay\.rbxinfra\.com/,
-    /metrics\.roblox\.com/,
-    /\/v1\/thumbnails/,
-    /\/v1\/games\/icons/,
-    /\/v1\/games\/multiget\/thumbnails/,
-    /\/beacon-api\//,
-  ];
-  const isTolerant = (u) => TOLERANT_PATTERNS.some((re) => re.test(u));
-
-  function mockBodyFor(url) {
-    if (/\/universes\/v1\/places\//.test(url)) return JSON.stringify({ universeId: null });
-    if (/\/v1\/locales\//.test(url)) return JSON.stringify({ generalExperience: { locale: 'en_us' }, ugc: { locale: 'en_us' } });
-    if (/\/v2\/assets\/[^/]+\/details/.test(url)) return JSON.stringify({ Name: '', Creator: { Name: '', HasVerifiedBadge: false } });
-    return JSON.stringify({});
-  }
-
-  // ============ WISP PROXY SETUP ============
-  const originalFetch = window.fetch.bind(window);
-  let wispClient = null;
-  let wispReady = false;
-
-  // Try to detect the wisp-client API shape
-  function tryCreateWispClient() {
-    const candidates = ['ClientConnection', 'WispClient', 'EpoxyClient', 'default'];
-    if (typeof wisp_client === 'undefined') {
-      emit('err', 'WISP', 'wisp-client.js did not define a global "wisp_client".');
-      emit('warn', 'WISP', 'If the file uses ES modules, add a module shim (see player.html comments).');
-      return null;
+    if (typeof crossOriginIsolated !== 'undefined' && !crossOriginIsolated) {
+      log('[WISP] crossOriginIsolated is false. coi-serviceworker may still be installing.');
     }
 
-    for (const name of candidates) {
-      const ctor = wisp_client[name];
-      if (typeof ctor === 'function') {
-        try {
-          emit('sys', 'WISP', `Attempting to instantiate wisp_client.${name}`);
-          const inst = new ctor(WISP_SERVER_URL);
-          emit('sys', 'WISP', `Instantiated wisp_client.${name} successfully.`);
-          return inst;
-        } catch (e) {
-          emit('err', 'WISP', `wisp_client.${name} threw: ${e.message}`);
+    // ---- Endpoints that are safe to mock (non-fatal) ----
+    const TOLERANT_PATTERNS = [
+      'economy.roblox.com/v2/assets/',
+      'apis.roblox.com/universes/',
+      'locale.roblox.com/',
+    ];
+
+    // ---- Domains that must go through the Wisp proxy ----
+    const ROBLOX_DOMAINS = [
+      'roblox.com',
+      'rbxcdn.com',
+      'robloxlabs.com',
+      'rbxcloud.com',
+    ];
+    const isRobloxUrl = (url) => {
+      try {
+        const h = new URL(url).hostname;
+        return ROBLOX_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
+      } catch {
+        return false;
+      }
+    };
+
+    // ---- Tolerant mock responses ----
+    function mockResponse(url) {
+      let body = { mocked: true, url };
+      if (url.includes('economy.roblox.com/v2/assets/')) {
+        body = { AssetTypeId: 10, IsOwned: false, Name: 'Mocked Asset' };
+      } else if (url.includes('apis.roblox.com/universes/')) {
+        body = { universeId: 0, name: 'Mocked Universe', placeId: 0 };
+      } else if (url.includes('locale.roblox.com/')) {
+        body = { locale: 'en_US', language: 'en' };
+      }
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ---- Worker wiring ----
+    const wispUrl = 'wss://epoxy-wisp-server.onrender.com';
+    const worker = new Worker('./epoxy-worker.js', { type: 'module' });
+
+    let readyResolve;
+    const workerReadyPromise = new Promise((r) => { readyResolve = r; });
+
+    const pending = new Map();
+    let nextId = 1;
+
+    worker.onmessage = (event) => {
+      const msg = event.data;
+      if (!msg || typeof msg !== 'object') return;
+
+      if (msg.type === 'ready') {
+        log('[WISP] Connected. Wisp fetch wrapper active.');
+        readyResolve();
+        return;
+      }
+
+      if (msg.type === 'error') {
+        log('[WISP] Worker error:', msg.error);
+        return;
+      }
+
+      if (msg.type === 'fetch-response') {
+        const p = pending.get(msg.id);
+        if (!p) return;
+        pending.delete(msg.id);
+
+        if (msg.error) {
+          p.reject(new Error(msg.error));
+          return;
+        }
+
+        const res = new Response(msg.body, {
+          status: msg.status,
+          statusText: msg.statusText || '',
+          headers: msg.headers,
+        });
+        // Response.url is read-only; override for callers that inspect it.
+        Object.defineProperty(res, 'url', { value: p.url });
+        p.resolve(res);
+      }
+    };
+
+    worker.onerror = (e) => {
+      log('[WISP] Worker onerror:', (e && e.message) || e);
+    };
+
+    function proxyFetch(url, method, headers, body) {
+      return new Promise((resolve, reject) => {
+        const id = nextId++;
+        pending.set(id, { resolve, reject, url });
+        worker.postMessage(
+          { type: 'fetch', id, url, method, headers, body },
+          body ? [body] : []
+        );
+      });
+    }
+
+    // ---- Fetch wrapper ----
+    const nativeFetch = window.fetch.bind(window);
+
+    window.fetch = async function (input, init = {}) {
+      let req;
+      try {
+        req = input instanceof Request ? input : new Request(input, init);
+      } catch {
+        // If we can't construct a Request (e.g. weird input), fall back to native.
+        return nativeFetch(input, init);
+      }
+
+      const url = req.url;
+
+      // Tolerant mocks first.
+      for (const pat of TOLERANT_PATTERNS) {
+        if (url.includes(pat)) {
+          dbg('[FETCH] (mock) ' + req.method + ' ' + url);
+          return mockResponse(url);
         }
       }
-    }
 
-    emit('err', 'WISP', 'No known wisp_client constructor found. Inspect wisp_client in the console.');
-    return null;
-  }
-
-  async function tryProxyViaWisp(url, method, body, headers) {
-    // Different wisp-client versions expose different request APIs.
-    // Try them in order of likelihood.
-    if (typeof wispClient.request === 'function') {
-      const r = await wispClient.request({
-        hostname: new URL(url).hostname,
-        port: new URL(url).port || 443,
-        path: new URL(url).pathname + new URL(url).search,
-        method, headers: headers || {}, body,
-      });
-      return new Response(r.body, {
-        status: r.statusCode || r.status,
-        statusText: r.statusMessage || r.statusText || '',
-        headers: new Headers(r.headers || {}),
-      });
-    }
-
-    if (typeof wispClient.fetch === 'function') {
-      return await wispClient.fetch(url, { method, body, headers });
-    }
-
-    if (typeof wispClient.createStream === 'function') {
-      throw new Error('wisp_client.createStream is available but raw HTTP-over-stream needs a helper (e.g. epoxy-client).');
-    }
-
-    throw new Error('wisp_client has no request/fetch/createStream method.');
-  }
-
-  function installFetchWrapper() {
-    window.fetch = async function (input, init) {
-      let url = '', method = 'GET', body = null, headers = null;
-      try {
-        url     = typeof input === 'string' ? input : (input && input.url) || '';
-        method  = (init && init.method) || (input && input.method) || 'GET';
-        body    = init && init.body;
-        headers = init && init.headers;
-      } catch {}
-
-      const hot = isRbx(url);
-      if (hot) {
-        emit('sys', 'FETCH', `→ ${method} ${url}`);
-        if (body && typeof body === 'string') emit('req', 'FETCH', `  req: ${short(body, 400)}`);
-      }
-
-      // If not a Roblox request, or wisp not ready, use the direct fetch.
-      if (!hot || !wispReady) {
+      // Roblox traffic -> Wisp.
+      if (isRobloxUrl(url)) {
+        await workerReadyPromise;
+        const body = req.body ? await req.arrayBuffer() : null;
+        dbg('[FETCH] \u2192 ' + req.method + ' ' + url);
         try {
-          const res = await originalFetch(input, init);
-          if (hot) {
-            emit(res.ok ? 'ok' : 'err', 'FETCH', `← ${res.status} (direct) ${method} ${url}`);
-            if (!res.ok) console.warn('[NET FAIL]', method, url, '→', res.status);
-          }
+          const res = await proxyFetch(url, req.method, [...req.headers], body);
+          dbg('[FETCH] \u2190 ' + res.status + ' (wisp) ' + req.method + ' ' + url);
           return res;
         } catch (e) {
-          if (hot && isTolerant(url)) {
-            emit('warn', 'FETCH', `  ↳ CORS-tolerant mock for ${url}`);
-            return new Response(mockBodyFor(url), { status: 200, headers: { 'Content-Type': 'application/json' } });
-          }
-          if (hot) emit('err', 'FETCH', `✖ ${method} ${url} THREW: ${e.message}`);
+          log('[FETCH] proxy failed for ' + url + ': ' + ((e && e.message) || e));
           throw e;
         }
       }
 
-      // Wisp path
-      try {
-        const res = await tryProxyViaWisp(url, method, body, headers);
-        emit(res.ok ? 'ok' : 'err', 'FETCH', `← ${res.status} ${res.statusText} (wisp) ${method} ${url}`);
-        emit('req', 'FETCH', `  res: ${await preview(res)}`);
-        return res;
-      } catch (e) {
-        emit('err', 'FETCH', `✖ Wisp failed for ${url}: ${e.message}`);
-        if (isTolerant(url)) {
-          emit('warn', 'FETCH', `  ↳ CORS-tolerant mock for ${url}`);
-          return new Response(mockBodyFor(url), { status: 200, headers: { 'Content-Type': 'application/json' } });
-        }
-        // Fall back to direct so the error is real, not synthetic
-        return originalFetch(input, init);
-      }
+      // Same-origin assets, CDN, etc.
+      return nativeFetch(req);
     };
-  }
 
-  function initWisp() {
-    emit('sys', 'BOOT', `Attempting Wisp connection to ${WISP_SERVER_URL}`);
-    wispClient = tryCreateWispClient();
+    // Boot the worker.
+    worker.postMessage({ type: 'init', wispUrl });
 
-    if (!wispClient) {
-      emit('err', 'WISP', 'Wisp unavailable. CORS failures will be mocked for known-tolerant endpoints.');
-      installFetchWrapper();
+    // Handy for debugging from devtools.
+    window.__rbxwasm = {
+      worker,
+      proxyFetch,
+      isRobloxUrl,
+      TOLERANT_PATTERNS,
+    };
+  })();
+  </script>
+
+  <!-- 2. Load the official engine files. The wrapper above is already installed. -->
+  <script src="./WasmLoader.js"></script>
+  <script src="./WasmPlayer.js"></script>
+  <script src="./WebClient.js"></script>
+
+  <!-- 3. Start the engine. -->
+  <script>
+  (function () {
+    'use strict';
+
+    const params = new URLSearchParams(location.search);
+    const placeId = params.get('placeId');
+    const debug = params.has('debug');
+
+    if (!placeId) {
+      console.warn('[LIFECYCLE] no startup place id; exiting');
       return;
     }
 
-    // Wire up lifecycle events if the client supports them
-    if (typeof wispClient.addEventListener === 'function') {
-      wispClient.addEventListener('open', () => {
-        emit('ok', 'WISP', 'Connected. Wisp fetch wrapper active.');
-        wispReady = true;
-      });
-      wispClient.addEventListener('close', () => {
-        emit('warn', 'WISP', 'Connection closed.');
-        wispReady = false;
-      });
-      wispClient.addEventListener('error', (e) => {
-        emit('err', 'WISP', `Error: ${e.message || e}`);
-      });
-    } else {
-      // Fallback: assume it's ready immediately or has onopen-style props
-      if ('onopen' in wispClient) {
-        wispClient.onopen = () => { emit('ok', 'WISP', 'Connected.'); wispReady = true; };
-        wispClient.onerror = (e) => emit('err', 'WISP', `Error: ${e.message || e}`);
-      } else if (typeof wispClient.connect === 'function') {
-        try {
-          const p = wispClient.connect();
-          if (p && typeof p.then === 'function') {
-            p.then(() => { emit('ok', 'WISP', 'Connected.'); wispReady = true; })
-             .catch((e) => emit('err', 'WISP', `Connect failed: ${e.message}`));
-          } else {
-            wispReady = true;
-            emit('ok', 'WISP', 'Connected (sync).');
-          }
-        } catch (e) {
-          emit('err', 'WISP', `Connect threw: ${e.message}`);
-        }
-      } else {
-        // If the client has neither events nor connect(), assume ready.
-        wispReady = true;
-        emit('warn', 'WISP', 'No lifecycle API detected; assuming connected.');
-      }
+    const canvas = document.getElementById('game-canvas');
+    console.log('[LIFECYCLE] starting engine with placeId=' + placeId);
+
+    // WasmLoader.js / WasmPlayer.js expose different entry points depending on
+    // the Roblox build. Try the common shapes, and leave a clear log if none
+    // match so the start call can be wired to the actual export.
+    const startArgs = { placeId, debug, canvas };
+
+    if (typeof window.WasmLoader !== 'undefined' &&
+        typeof window.WasmLoader.start === 'function') {
+      window.WasmLoader.start(startArgs);
+      return;
+    }
+    if (typeof window.WasmPlayer !== 'undefined' &&
+        typeof window.WasmPlayer.start === 'function') {
+      window.WasmPlayer.start(startArgs);
+      return;
+    }
+    if (typeof window.RobloxWasmStart === 'function') {
+      window.RobloxWasmStart(startArgs);
+      return;
     }
 
-    installFetchWrapper();
-  }
-
-  // ============ XMLHttpRequest ============
-  const _open = XMLHttpRequest.prototype.open;
-  const _send = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (m, u) {
-    this.__traceUrl = u;
-    this.__traceMethod = m;
-    return _open.apply(this, arguments);
-  };
-  XMLHttpRequest.prototype.send = function (body) {
-    const url = this.__traceUrl || '';
-    const method = this.__traceMethod || 'GET';
-    if (isRbx(url)) {
-      emit('sys', 'XHR', `→ ${method} ${url}`);
-      if (body && typeof body === 'string') emit('req', 'XHR', `  req: ${short(body, 400)}`);
-      this.addEventListener('load', () => {
-        const ok = this.status >= 200 && this.status < 400;
-        emit(ok ? 'ok' : 'err', 'XHR', `← ${this.status} ${method} ${url}`);
-        try { emit('req', 'XHR', `  res: ${short(this.responseText, 700)}`); } catch {}
-      });
-      this.addEventListener('error', () => emit('err', 'XHR', `✖ ${method} ${url} ERROR`));
-      this.addEventListener('timeout', () => emit('err', 'XHR', `✖ ${method} ${url} TIMEOUT`));
-    }
-    return _send.apply(this, arguments);
-  };
-
-  // ============ WebSocket ============
-  const _WS = window.WebSocket;
-  function WrappedWS(url, protocols) {
-    if (isRbx(url)) emit('sys', 'WS', `→ ${url}`);
-    const ws = protocols ? new _WS(url, protocols) : new _WS(url);
-    if (isRbx(url)) {
-      ws.addEventListener('open',  () => emit('ok',  'WS', `← open ${url}`));
-      ws.addEventListener('close', (e) => emit(e.code === 1000 ? 'req' : 'err', 'WS', `← close ${url} code=${e.code}`));
-      ws.addEventListener('error', () => emit('err', 'WS', `✖ error ${url}`));
-    }
-    return ws;
-  }
-  WrappedWS.prototype = _WS.prototype;
-  Object.setPrototypeOf(WrappedWS, _WS);
-  window.WebSocket = WrappedWS;
-
-  // ============ Error handlers ============
-  window.addEventListener('error', (ev) => {
-    emit('err', 'JS-ERR', `${ev.message} @ ${ev.filename}:${ev.lineno}:${ev.colno}`);
-  });
-  window.addEventListener('unhandledrejection', (ev) => {
-    const r = ev.reason;
-    emit('err', 'JS-REJ', String(r && (r.stack || r.message || r)));
-  });
-
-  // ============ Boot ============
-  emit('sys', 'BOOT', 'Network tracer installed.');
-  emit('sys', 'BOOT', showOverlay ? 'Overlay enabled (?debug=1).' : 'Add ?debug=1 to URL for on-screen log.');
-  initWisp();
-})();
-</script>
-
-<!-- ======================================================================
-     4. HOST CONFIG
-     ====================================================================== -->
-<script>
-  window.robloxWasmHostConfig = {
-    server: 'prod',
-    useCdnBinary: false,
-  };
-</script>
-
-<!-- ======================================================================
-     5. ENGINE LOADER
-     ====================================================================== -->
-<script src="./WasmLoader.js"></script>
-
+    console.warn(
+      '[LIFECYCLE] No known engine start function found. ' +
+      'Inspect WasmLoader.js / WasmPlayer.js globals and wire the start call here.'
+    );
+  })();
+  </script>
 </body>
 </html>
