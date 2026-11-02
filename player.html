@@ -80,7 +80,7 @@
     const log = (...a) => console.log(...a);
     const dbg = (...a) => { if (DEBUG) console.log(...a); };
 
-    const TOLERANT_PATTERNS = ['economy.roblox.com/v2/assets/','apis.roblox.com/universes/','locale.roblox.com/'];
+    const TOLERANT_PATTERNS = ['economy.roblox.com/v2/assets/','locale.roblox.com/'];
     const ROBLOX_DOMAINS = ['roblox.com','rbxcdn.com','robloxlabs.com','rbxcloud.com'];
     const isRobloxUrl = (url) => {
       try { const h = new URL(url).hostname;
