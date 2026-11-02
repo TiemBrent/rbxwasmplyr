@@ -64,7 +64,7 @@
       <div id="loading-error-message"></div>
       <div id="loading-error-code"></div>
       <button class="btn" id="loading-error-leave">Leave</button>
-      <button class="btn" id="loading-cancel">Cancel</button>
+      <button class="btn" id="loading-error-cancel">Cancel</button>
     </div>
   </div>
 
@@ -80,7 +80,9 @@
     const log = (...a) => console.log(...a);
     const dbg = (...a) => { if (DEBUG) console.log(...a); };
 
-    const TOLERANT_PATTERNS = ['economy.roblox.com/v2/assets/','locale.roblox.com/'];
+    // Only the locale endpoint is mocked now.
+    // economy and universes are unmocked so the real ownership/asset data comes through.
+    const TOLERANT_PATTERNS = ['locale.roblox.com/'];
     const ROBLOX_DOMAINS = ['roblox.com','rbxcdn.com','robloxlabs.com','rbxcloud.com'];
     const isRobloxUrl = (url) => {
       try { const h = new URL(url).hostname;
@@ -89,11 +91,29 @@
     };
 
     function mockResponse(url) {
-      let body = { mocked: true, url };
-      if (url.includes('economy.roblox.com/v2/assets/')) body = { AssetTypeId: 10, IsOwned: false, Name: 'Mocked Asset' };
-      else if (url.includes('apis.roblox.com/universes/')) body = { universeId: 0, name: 'Mocked Universe', placeId: 0 };
-      else if (url.includes('locale.roblox.com/')) body = { locale: 'en_US', language: 'en' };
-      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.includes('locale.roblox.com/')) {
+        return new Response(JSON.stringify({ locale: 'en_US', language: 'en' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+
+    // Intercept economy.roblox.com/v2/assets/*/details and force IsOwned: true.
+    // This is the cheap test: if the engine is gating on IsOwned, this flips it.
+    async function handleAssetDetails(url, res) {
+      try {
+        const text = await res.text();
+        let body;
+        try { body = JSON.parse(text); } catch { return new Response(text, { status: res.status, headers: res.headers }); }
+        console.log('[OWNED-PATCH] original IsOwned=' + body.IsOwned + ' -> forcing true');
+        body.IsOwned = true;
+        if (!body.Creator) body.Creator = { Id: 1, Name: 'Test', CreatorType: 'User' };
+        if (!body.CreatorTargetId) body.CreatorTargetId = 1;
+        return new Response(JSON.stringify(body), { status: res.status, headers: { 'Content-Type': 'application/json' } });
+      } catch (e) {
+        console.error('[OWNED-PATCH] failed:', e);
+        return res;
+      }
     }
 
     const wispUrl = 'wss://epoxy-wisp-server.onrender.com';
@@ -142,6 +162,13 @@
         try {
           const res = await proxyFetch(url, req.method, [...req.headers], body);
           dbg('[FETCH] ← ' + res.status + ' (wisp) ' + req.method + ' ' + url);
+
+          // Force IsOwned: true on asset-details responses so the engine
+          // believes the account owns the place.
+          if (url.includes('economy.roblox.com/v2/assets/') && url.includes('/details')) {
+            return await handleAssetDetails(url, res);
+          }
+
           return res;
         } catch (e) {
           log('[FETCH] proxy failed for ' + url + ': ' + ((e && e.message) || e));
@@ -161,84 +188,45 @@
   (function () {
     'use strict';
     const log = (...a) => console.log(...a);
-
     const GUARD_RE = /([A-Za-z_$][\w$]*)&&([A-Za-z_$][\w$]*)\.set_place_id\(\1\)/;
 
     function patchWasmPlayer(src) {
       const m = src.match(GUARD_RE);
-      if (!m) {
-        console.warn('[PATCH] set_place_id guard pattern not found — leaving unchanged');
-        return src;
-      }
-      const guard = m[1];
-      const mod = m[2];
+      if (!m) return src;
+      const guard = m[1], mod = m[2];
       log('[PATCH] Found guard: ' + guard + '&&' + mod + '.set_place_id(' + guard + ')');
-
-      // Verbose replacement — logs unconditionally so we can see exactly
-      // what happens at runtime even though set_place_id itself is silent
-      // in the [WASM-JSPI] trace (numeric args don't trigger allocator warnings).
       const replacement =
-        '(function(){' +
-          'try{' +
-            'var p=new URLSearchParams(location.search).get("placeId");' +
-            'console.log("[PLACE-PATCH] IIFE ran, location.search=" + JSON.stringify(location.search) + " p=" + JSON.stringify(p) + " guard.typeof=" + (typeof ' + guard + ') + " guard.value=" + JSON.stringify(' + guard + '));' +
-            'if(p){' +
-              'var pid=Number(p);' +
-              'console.log("[PLACE-PATCH] calling set_place_id(" + pid + ")");' +
-              mod + '.set_place_id(pid);' +
-              'console.log("[PLACE-PATCH] set_place_id returned successfully");' +
-            '}else if(' + guard + '){' +
-              'console.log("[PLACE-PATCH] calling set_place_id(" + ' + guard + ' + ") from guard");' +
-              mod + '.set_place_id(' + guard + ');' +
-              'console.log("[PLACE-PATCH] set_place_id returned successfully");' +
-            '}else{' +
-              'console.warn("[PLACE-PATCH] neither p nor guard truthy — skipping");' +
-            '}' +
-          '}catch(e){' +
-            'console.error("[PLACE-PATCH] threw:", e && (e.stack || e.message || e));' +
-          '}' +
-        '})()';
+        '(function(){var p=new URLSearchParams(location.search).get("placeId");' +
+        'if(p){' + mod + '.set_place_id(Number(p))}' +
+        'else if(' + guard + '){' + mod + '.set_place_id(' + guard + ')}})()';
       return src.replace(GUARD_RE, replacement);
     }
 
     const origAppend = Node.prototype.appendChild;
     Node.prototype.appendChild = function (node) {
-      if (!(node instanceof HTMLScriptElement) ||
-          typeof node.src !== 'string' ||
+      if (!(node instanceof HTMLScriptElement) || typeof node.src !== 'string' ||
           !/\/WasmPlayer\.js(\?|$)/.test(node.src)) {
         return origAppend.call(this, node);
       }
-
       const cdnUrl = node.src;
       const parent = this;
-      log('[PATCH] Intercepted WasmPlayer.js append: ' + cdnUrl);
-
       (async () => {
         try {
           const res = await window.__rbxwasm.proxyFetch(cdnUrl, 'GET', [], null);
           const src = await res.text();
-          log('[PATCH] Fetched ' + src.length + ' bytes of WasmPlayer.js');
-
           const patched = patchWasmPlayer(src);
-          log('[PATCH] Post-patch size: ' + patched.length + ' bytes (delta ' + (patched.length - src.length) + ')');
-
-          const blob = new Blob([patched], { type: 'application/javascript' });
-          const blobUrl = URL.createObjectURL(blob);
-
+          const blob = URL.createObjectURL(new Blob([patched], { type: 'application/javascript' }));
           const s = document.createElement('script');
-          s.src = blobUrl;
+          s.src = blob;
           origAppend.call(parent, s);
-          log('[PATCH] Injected patched WasmPlayer.js from blob: ' + blobUrl);
-          s.addEventListener('load', () => URL.revokeObjectURL(blobUrl), { once: true });
+          s.addEventListener('load', () => URL.revokeObjectURL(blob), { once: true });
         } catch (e) {
-          console.error('[PATCH] Failed to patch, falling back to CDN:', e);
+          console.error('[PATCH] failed:', e);
           const s = document.createElement('script');
-          s.src = cdnUrl;
-          s.crossOrigin = 'anonymous';
+          s.src = cdnUrl; s.crossOrigin = 'anonymous';
           origAppend.call(parent, s);
         }
       })();
-
       return node;
     };
   })();
