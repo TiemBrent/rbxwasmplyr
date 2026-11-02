@@ -118,11 +118,41 @@
     };
     worker.onerror = (e) => { log('[WISP] Worker onerror:', (e && e.message) || e); };
 
-    function proxyFetch(url, method, headers, body) {
+    // KEY FIX: proxyFetch now auto-detects whether the body is text-based
+    // from the Content-Type header. When it is, the worker decodes the
+    // buffer back to a string before handing it to Epoxy — otherwise
+    // Epoxy treats the body as raw bytes and strips/overwrites the
+    // Content-Type header, which was causing the 415 on gamejoin.
+    function proxyFetch(url, method, headers, body, bodyIsText) {
+      if (bodyIsText === undefined && body) {
+        const hdrs = headers || [];
+        const ctEntry = hdrs.find(([k]) => String(k).toLowerCase() === 'content-type');
+        if (ctEntry) {
+          const v = String(ctEntry[1]).toLowerCase();
+          bodyIsText =
+            v.includes('application/json') ||
+            v.includes('application/x-www-form-urlencoded') ||
+            v.includes('application/javascript') ||
+            v.includes('text/');
+        } else {
+          bodyIsText = false;
+        }
+      }
+      bodyIsText = !!bodyIsText;
+
+      if (body && DEBUG) {
+        log('[PROXY] ' + method + ' ' + url + ' bodyIsText=' + bodyIsText);
+      }
+
       return new Promise((resolve, reject) => {
         const id = nextId++;
         pending.set(id, { resolve, reject, url });
-        worker.postMessage({ type: 'fetch', id, url, method, headers, body }, body ? [body] : []);
+        // Text bodies are copied (small); binary bodies are transferred.
+        const transfer = body && !bodyIsText ? [body] : [];
+        worker.postMessage(
+          { type: 'fetch', id, url, method, headers, body, bodyIsText },
+          transfer
+        );
       });
     }
 
