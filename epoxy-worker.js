@@ -41,14 +41,16 @@ self.onmessage = async (event) => {
 
       const init = { method: method || 'GET' };
 
+      // Plain object, not Headers — Epoxy's Rust side preserves these reliably.
       if (headers && headers.length) {
-        init.headers = new Headers(headers);
+        const hdrs = {};
+        for (const [k, v] of headers) {
+          hdrs[String(k)] = String(v);
+        }
+        init.headers = hdrs;
       }
 
       if (body != null) {
-        // KEY FIX: if the caller marked this as text, pass a string so
-        // Epoxy forwards the Content-Type header instead of overwriting
-        // it with application/octet-stream for binary bodies.
         if (bodyIsText) {
           init.body = new TextDecoder().decode(body);
         } else {
@@ -56,14 +58,13 @@ self.onmessage = async (event) => {
         }
       }
 
-      // Belt-and-suspenders: if a Content-Type was provided but Epoxy
-      // still drops it for some reason, force it back on the request.
-      // (This is the header that was arriving as `undefined` in httpbin.)
-      const ct = init.headers ? init.headers.get('content-type') : null;
-      if (ct && bodyIsText) {
-        // Redundant with the string body, but harmless.
-        init.headers.set('content-type', ct);
-      }
+      // Debug: confirm what we're actually handing to Epoxy
+      self.postMessage({
+        type: 'debug',
+        msg: '[WORKER] ' + method + ' ' + url +
+             ' bodyIsText=' + bodyIsText +
+             ' headers=' + JSON.stringify(init.headers),
+      });
 
       const res = await client.fetch(url, init);
       const buf = await res.arrayBuffer();
