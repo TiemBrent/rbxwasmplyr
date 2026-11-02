@@ -5,7 +5,7 @@
 import init, {
   EpoxyClient,
   EpoxyClientOptions,
-} from 'https://cdn.jsdelivr.net/npm/@mercuryworkshop/epoxy-tls@2.1.19-1/epoxy-bundled';
+} from 'https://esm.sh/@mercuryworkshop/epoxy-tls@2.1.19-1/epoxy-bundled';
 
 let client = null;
 
@@ -16,6 +16,7 @@ self.onmessage = async (event) => {
   // ---- init ----
   if (msg.type === 'init') {
     try {
+      // For the bundled version, init() takes no arguments.
       await init();
 
       const options = new EpoxyClientOptions();
