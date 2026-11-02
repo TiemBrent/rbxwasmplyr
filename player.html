@@ -32,7 +32,6 @@
     #loading-verified-badge { display: inline-block; width: 16px; height: 16px; margin-left: 6px; vertical-align: middle; }
     #loading-experience-title { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
     #loading-experience-creator { font-size: 14px; color: #aaa; margin-bottom: 20px; }
-    /* Comprehensive status/progress IDs */
     #loading-text,
     #loading-status,
     #loading-message,
@@ -55,7 +54,17 @@
     #loading-error-code { font-size: 12px; color: #666; margin-bottom: 20px; }
     .btn { padding: 8px 20px; border: 1px solid #444; border-radius: 6px; background: #222; color: #eee; font-size: 14px; cursor: pointer; margin: 0 4px; }
     .btn:hover { background: #333; }
-    #proxyenabled { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+    /* Hidden status mirrors used by WasmPlayer.js */
+    #server,
+    #proxyenabled {
+      position: absolute;
+      width: 1px; height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+
     #loading-cancel { margin-top: 16px; }
   </style>
 </head>
@@ -68,14 +77,18 @@
     <div id="loading-experience-title"></div>
     <div id="loading-experience-creator"></div>
     <div class="loading-spinner"></div>
-    <!-- Comprehensive status/progress elements -->
     <div id="loading-text"></div>
     <div id="loading-status"></div>
     <div id="loading-message"></div>
     <div id="loading-progress"></div>
     <div id="loading-subtext"></div>
     <div id="status"></div>
+
+    <!-- Required by WasmPlayer.js Ae(): document.getElementById("server").innerText = t -->
+    <div id="server"></div>
+    <!-- Required by WasmPlayer.js Ae(): document.getElementById("proxyenabled") -->
     <span id="proxyenabled"></span>
+
     <div class="loading-error-panel">
       <div id="loading-error-title">Error</div>
       <div id="loading-error-message"></div>
@@ -84,6 +97,7 @@
       <button class="btn" id="loading-cancel">Cancel</button>
     </div>
   </div>
+
   <script>
     window.robloxWasmHostConfig = { server: 'prod' };
   </script>
@@ -141,7 +155,6 @@
     window.__rbxwasm = { worker, proxyFetch, isRobloxUrl, TOLERANT_PATTERNS };
   })();
   </script>
-  <!-- FIX: Load the engine script only after the DOM is fully parsed -->
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       const script = document.createElement('script');
